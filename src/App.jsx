@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2 } from 'lucide-react';
+import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings } from 'lucide-react';
 
 // --- [초기 설정 및 목표] ---
-const DAILY_GOALS = { kcal: 1400, carb: 140, protein: 80, fat: 40, sugar: 25 };
 const START_WEIGHT = 52.0;
 
 // 날짜 포맷 유틸
@@ -50,6 +49,7 @@ export default function App() {
   const closeDialog = () => setDialog({ isOpen: false, type: 'alert', message: '', onConfirm: null });
 
   // --- [데이터 상태 (로컬 스토리지 연동)] ---
+  const [dailyGoals, setDailyGoals] = useState(() => getInitialState('dailyGoals', { kcal: 1400, carb: 140, protein: 80, fat: 40, sugar: 25 }));
   const [dDayConfig, setDDayConfig] = useState(() => getInitialState('dDayConfig', { date: todayStr, type: 'start' }));
 
   const [nutritionDB, setNutritionDB] = useState(() => getInitialState('nutritionDB', {
@@ -78,6 +78,7 @@ export default function App() {
   }));
 
   // 데이터 변경 시 로컬 스토리지 자동 저장
+  useEffect(() => localStorage.setItem('dailyGoals', JSON.stringify(dailyGoals)), [dailyGoals]);
   useEffect(() => localStorage.setItem('dDayConfig', JSON.stringify(dDayConfig)), [dDayConfig]);
   useEffect(() => localStorage.setItem('nutritionDB', JSON.stringify(nutritionDB)), [nutritionDB]);
   useEffect(() => localStorage.setItem('exerciseDB', JSON.stringify(exerciseDB)), [exerciseDB]);
@@ -87,8 +88,9 @@ export default function App() {
   useEffect(() => localStorage.setItem('weeklyExercisePlan', JSON.stringify(weeklyExercisePlan)), [weeklyExercisePlan]);
 
   const [formData, setFormData] = useState({
-    meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, exerciseName: '', exTime: '',
-    ddayType: 'start', ddayDate: todayStr
+    meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, memo: '', exerciseName: '', exTime: '',
+    ddayType: 'start', ddayDate: todayStr,
+    goalKcal: '', goalCarb: '', goalProtein: '', goalFat: '', goalSugar: ''
   });
   const [recipeForm, setRecipeForm] = useState({ name: '', ingredients: [] });
   const [newIngredient, setNewIngredient] = useState({ menu: Object.keys(nutritionDB)[0] || '', qty: 1 });
@@ -146,6 +148,10 @@ export default function App() {
 
     if (type === 'dday') {
       setFormData(prev => ({ ...prev, ddayType: dDayConfig.type || 'start', ddayDate: dDayConfig.date || todayStr }));
+    } else if (type === 'goals') {
+      setFormData(prev => ({ 
+        ...prev, goalKcal: dailyGoals.kcal, goalCarb: dailyGoals.carb, goalProtein: dailyGoals.protein, goalFat: dailyGoals.fat, goalSugar: dailyGoals.sugar 
+      }));
     } else if (existingLog) {
       setFormData(prev => ({
         ...prev,
@@ -155,6 +161,7 @@ export default function App() {
         weight: existingLog.weight || '',
         time: existingLog.time || '08:00',
         restroom: existingLog.restroom || false,
+        memo: existingLog.memo || '',
         exerciseName: existingLog.name || (Object.keys(exerciseDB)[0] || ''),
         exTime: existingLog.time !== undefined ? existingLog.time : ''
       }));
@@ -162,7 +169,7 @@ export default function App() {
       setFormData(prev => ({
         ...prev,
         meal: '아침', menu: Object.keys(nutritionDB)[0] || '', qty: 1,
-        weight: '', time: '08:00', restroom: false,
+        weight: '', time: '08:00', restroom: false, memo: '',
         exerciseName: Object.keys(exerciseDB)[0] || '', exTime: ''
       }));
     }
@@ -179,6 +186,15 @@ export default function App() {
       return;
     }
 
+    if (modalType === 'goals') {
+      setDailyGoals({
+        kcal: Number(formData.goalKcal), carb: Number(formData.goalCarb), protein: Number(formData.goalProtein), fat: Number(formData.goalFat), sugar: Number(formData.goalSugar)
+      });
+      setIsModalOpen(false);
+      showAlert("목표 영양소가 업데이트 되었습니다.");
+      return;
+    }
+
     const newLogId = editingLogId || Date.now();
     const baseLog = { id: newLogId, date: modalDate };
 
@@ -188,7 +204,7 @@ export default function App() {
       else setDietLogs([...dietLogs, data]);
       
     } else if (modalType === 'weight') {
-      const data = { ...baseLog, weight: Number(formData.weight), time: formData.time, restroom: formData.restroom };
+      const data = { ...baseLog, weight: Number(formData.weight), time: formData.time, restroom: formData.restroom, memo: formData.memo };
       const newArray = editingLogId ? weightLogs.map(l => l.id === editingLogId ? data : l) : [...weightLogs, data];
       setWeightLogs(newArray.sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
       
@@ -309,14 +325,19 @@ export default function App() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 w-full">
-          <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center"><Activity size={16} className="mr-1 text-red-500"/> 남은 영양소 (오늘)</h3>
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 w-full relative">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center"><Activity size={16} className="mr-1 text-red-500"/> 남은 영양소 (오늘)</h3>
+            <button onClick={() => openModal('goals')} className="text-gray-400 hover:text-gray-700 bg-gray-50 p-1.5 rounded-lg border border-gray-100 transition-colors">
+              <Settings size={14} />
+            </button>
+          </div>
           {[
-            { label: '칼로리', cur: todayMacros.kcal, max: DAILY_GOALS.kcal, unit: 'kcal', color: 'bg-red-400' },
-            { label: '탄수화물', cur: todayMacros.carb, max: DAILY_GOALS.carb, unit: 'g', color: 'bg-blue-400' },
-            { label: '단백질', cur: todayMacros.protein, max: DAILY_GOALS.protein, unit: 'g', color: 'bg-green-400' },
-            { label: '지방', cur: todayMacros.fat, max: DAILY_GOALS.fat, unit: 'g', color: 'bg-yellow-400' },
-            { label: '당류', cur: todayMacros.sugar, max: DAILY_GOALS.sugar, unit: 'g', color: 'bg-purple-400' }
+            { label: '칼로리', cur: todayMacros.kcal, max: dailyGoals.kcal, unit: 'kcal', color: 'bg-red-400' },
+            { label: '탄수화물', cur: todayMacros.carb, max: dailyGoals.carb, unit: 'g', color: 'bg-blue-400' },
+            { label: '단백질', cur: todayMacros.protein, max: dailyGoals.protein, unit: 'g', color: 'bg-green-400' },
+            { label: '지방', cur: todayMacros.fat, max: dailyGoals.fat, unit: 'g', color: 'bg-yellow-400' },
+            { label: '첨가당', cur: todayMacros.sugar, max: dailyGoals.sugar, unit: 'g', color: 'bg-purple-400' }
           ].map(n => {
             const pct = Math.min((n.cur / n.max) * 100, 100);
             return (
@@ -452,8 +473,8 @@ export default function App() {
               <table className="w-full text-center text-[11px]">
                 <thead>
                   <tr className="bg-gray-100 text-gray-600">
-                    <th className="p-1.5">구분</th><th className="p-1.5">칼로리</th><th className="p-1.5">탄수</th>
-                    <th className="p-1.5">단백질</th><th className="p-1.5">지방</th><th className="p-1.5">당류</th>
+                    <th className="p-1.5">구분</th><th className="p-1.5">칼로리</th><th className="p-1.5">탄수화물</th>
+                    <th className="p-1.5">단백질</th><th className="p-1.5">지방</th><th className="p-1.5">첨가당</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -466,9 +487,9 @@ export default function App() {
                   <tr>
                     <td className="p-2 font-bold bg-gray-50 text-gray-700">잔여량</td>
                     {[
-                      { cur: selectedMacros.kcal, max: DAILY_GOALS.kcal }, { cur: selectedMacros.carb, max: DAILY_GOALS.carb },
-                      { cur: selectedMacros.protein, max: DAILY_GOALS.protein }, { cur: selectedMacros.fat, max: DAILY_GOALS.fat },
-                      { cur: selectedMacros.sugar, max: DAILY_GOALS.sugar }
+                      { cur: selectedMacros.kcal, max: dailyGoals.kcal }, { cur: selectedMacros.carb, max: dailyGoals.carb },
+                      { cur: selectedMacros.protein, max: dailyGoals.protein }, { cur: selectedMacros.fat, max: dailyGoals.fat },
+                      { cur: selectedMacros.sugar, max: dailyGoals.sugar }
                     ].map((item, i) => {
                       const diff = (item.max - item.cur).toFixed(1);
                       return <td key={i} className={`p-2 font-bold ${diff >= 0 ? 'text-blue-500' : 'text-red-500'}`}>{diff >= 0 ? `+${diff}` : diff}</td>
@@ -592,12 +613,15 @@ export default function App() {
              <div className="space-y-2">
                {tLogs.map(log => (
                  <div key={log.id} onClick={() => openModal('weight', log, selectedWeightDate)} 
-                      className="flex justify-between items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 border border-gray-100 transition-colors">
-                   <span className="text-sm text-gray-600 font-medium">{log.time}</span>
-                   <div className="flex items-center gap-3">
-                     <span className="font-bold text-blue-600">{log.weight} kg</span>
-                     {log.restroom && <Check size={16} className="text-red-500" strokeWidth={3}/>}
+                      className="flex flex-col p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 border border-gray-100 transition-colors">
+                   <div className="flex justify-between items-center mb-1">
+                     <span className="text-sm text-gray-600 font-medium">{log.time}</span>
+                     <div className="flex items-center gap-3">
+                       <span className="font-bold text-blue-600">{log.weight} kg</span>
+                       {log.restroom && <Check size={16} className="text-red-500" strokeWidth={3}/>}
+                     </div>
                    </div>
+                   {log.memo && <div className="text-xs text-gray-500 bg-white p-2 rounded border border-gray-100 mt-1">{log.memo}</div>}
                  </div>
                ))}
              </div>
@@ -844,7 +868,7 @@ export default function App() {
                </div>
                <div className="grid grid-cols-2 gap-3">
                  {['kcal', 'carb', 'protein', 'fat', 'sugar'].map(field => {
-                   const labels = { kcal: '칼로리(kcal)', carb: '탄수화물(g)', protein: '단백질(g)', fat: '지방(g)', sugar: '당류(g)' };
+                   const labels = { kcal: '칼로리(kcal)', carb: '탄수화물(g)', protein: '단백질(g)', fat: '지방(g)', sugar: '첨가당(g)' };
                    return (
                      <div key={field}>
                        <label className="text-[10px] font-semibold text-gray-500 block mb-1">{labels[field]}</label>
@@ -979,6 +1003,7 @@ export default function App() {
            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={20}/></button>
            <h2 className="text-xl font-extrabold text-gray-800 mb-6 flex items-center">
              {modalType === 'dday' ? <><Calendar className="mr-2 text-blue-500"/> 디데이 설정</> : 
+              modalType === 'goals' ? <><Settings className="mr-2 text-gray-700"/> 목표 영양소 설정</> :
               modalType === 'diet' ? <><Utensils className="mr-2 text-orange-500"/> 식단 {editingLogId ? '수정' : '기록'}</> : 
               modalType === 'weight' ? <><Scale className="mr-2 text-blue-500"/> 체중 {editingLogId ? '수정' : '기록'}</> : 
               <><Dumbbell className="mr-2 text-indigo-500"/> 운동 {editingLogId ? '수정' : '기록'}</>}
@@ -1002,6 +1027,36 @@ export default function App() {
                    <input type="date" name="ddayDate" value={formData.ddayDate} onChange={handleInputChange} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-300" required />
                  </div>
                </>
+             )}
+
+             {modalType === 'goals' && (
+               <div className="space-y-3">
+                 <div className="flex justify-between items-center gap-4">
+                   <label className="text-sm font-bold text-gray-700 w-24">목표 칼로리</label>
+                   <input type="number" name="goalKcal" value={formData.goalKcal} onChange={handleInputChange} className="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-gray-300" required />
+                   <span className="text-xs text-gray-500 w-8">kcal</span>
+                 </div>
+                 <div className="flex justify-between items-center gap-4">
+                   <label className="text-sm font-bold text-gray-700 w-24">탄수화물</label>
+                   <input type="number" name="goalCarb" value={formData.goalCarb} onChange={handleInputChange} className="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-300" required />
+                   <span className="text-xs text-gray-500 w-8">g</span>
+                 </div>
+                 <div className="flex justify-between items-center gap-4">
+                   <label className="text-sm font-bold text-gray-700 w-24">단백질</label>
+                   <input type="number" name="goalProtein" value={formData.goalProtein} onChange={handleInputChange} className="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-green-300" required />
+                   <span className="text-xs text-gray-500 w-8">g</span>
+                 </div>
+                 <div className="flex justify-between items-center gap-4">
+                   <label className="text-sm font-bold text-gray-700 w-24">지방</label>
+                   <input type="number" name="goalFat" value={formData.goalFat} onChange={handleInputChange} className="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-yellow-300" required />
+                   <span className="text-xs text-gray-500 w-8">g</span>
+                 </div>
+                 <div className="flex justify-between items-center gap-4">
+                   <label className="text-sm font-bold text-gray-700 w-24">첨가당</label>
+                   <input type="number" name="goalSugar" value={formData.goalSugar} onChange={handleInputChange} className="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-purple-300" required />
+                   <span className="text-xs text-gray-500 w-8">g</span>
+                 </div>
+               </div>
              )}
 
              {modalType === 'diet' && (
@@ -1041,6 +1096,10 @@ export default function App() {
                    <input type="checkbox" name="restroom" id="restroom" checked={formData.restroom} onChange={handleInputChange} className="w-5 h-5 text-red-500 rounded cursor-pointer" />
                    <label htmlFor="restroom" className="ml-3 font-semibold text-red-700 cursor-pointer w-full">화장실 다녀옴 (✔)</label>
                  </div>
+                 <div>
+                   <label className="block text-sm font-bold text-gray-700 mb-1">메모 (선택)</label>
+                   <input type="text" name="memo" value={formData.memo} onChange={handleInputChange} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-300 placeholder-gray-400" placeholder="예: 어제 야식 먹음, 생리 시작 등" />
+                 </div>
                </>
              )}
  
@@ -1065,13 +1124,13 @@ export default function App() {
              )}
  
              <div className="flex gap-3 mt-4">
-                {editingLogId && modalType !== 'dday' && (
+                {editingLogId && modalType !== 'dday' && modalType !== 'goals' && (
                   <button type="button" onClick={deleteLog} className="w-1/4 bg-red-100 hover:bg-red-200 text-red-600 font-bold py-4 rounded-xl transition duration-200 flex justify-center items-center">
                     <Trash2 size={20} />
                   </button>
                 )}
                 <button type="submit" className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl transition duration-200 text-lg shadow-lg">
-                  {modalType === 'dday' ? '설정 저장' : (editingLogId ? '수정 완료' : '기록 저장')}
+                  {modalType === 'dday' || modalType === 'goals' ? '설정 저장' : (editingLogId ? '수정 완료' : '기록 저장')}
                 </button>
              </div>
            </form>
