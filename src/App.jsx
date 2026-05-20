@@ -74,11 +74,25 @@ export default function App() {
   const [weeklyExercisePlan, setWeeklyExercisePlan] = useState({
     0: [], 1: ['러닝', '스쿼트'], 2: ['푸시업', '아랫배'], 3: ['러닝'], 4: ['스쿼트', '폼롤러'], 5: ['자유 헬스'], 6: []
   });
-      setFormData(prev => ({ ...prev, exerciseName: value, exTime: dbEx?.time > 0 ? dbEx.time : '' }));
-    } else {
-      setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-    }
-  };
+const handleInputChange = (e) => {
+  const { name, value, type, checked } = e.target;
+
+  if (name === 'exerciseName') {
+    const dbEx = exerciseDB[value];
+
+    setFormData(prev => ({
+      ...prev,
+      exerciseName: value,
+      exTime: dbEx?.time > 0 ? dbEx.time : ''
+    }));
+  } else {
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  }
+};
+
 
   const getDayLogs = (logs, dateStr) => logs.filter(log => log.date === dateStr);
 
@@ -237,27 +251,6 @@ export default function App() {
               <p className="text-xs text-gray-500 font-medium">오늘은 계획된 운동이 없습니다.<br/>푹 쉬거나 가벼운 스트레칭은 어떨까요?</p>
             </div>
           )}
-        </div>
-
-        {/* 4. AI 트레이너 피드백 */}
-        <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-5 rounded-2xl shadow-sm border border-indigo-100 w-full relative overflow-hidden">
-          <div className="flex items-center mb-3">
-            <Bot size={20} className="text-indigo-600 mr-2" />
-            <h3 className="text-sm font-extrabold text-indigo-900">오늘의 AI 트레이너 코멘트</h3>
-          </div>
-          {isAiFeedbackLoading ? (
-            <div className="animate-pulse flex space-x-2 items-center py-2 text-indigo-500 text-xs font-medium"><span>Gemini AI가 오늘의 기록을 분석하고 있어요...</span></div>
-          ) : aiFeedback ? (
-            <div className="text-sm text-indigo-800 leading-relaxed bg-white/60 p-4 rounded-xl border border-indigo-100/50 shadow-sm backdrop-blur-sm">{aiFeedback}</div>
-          ) : (
-            <div className="text-center py-2">
-              <button onClick={getAiFeedback} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-5 rounded-full text-xs shadow-md transition-transform active:scale-95 flex items-center mx-auto">
-                <Sparkles size={14} className="mr-1.5" /> ✨ AI 코멘트 받기
-              </button>
-              <p className="text-[10px] text-indigo-400 mt-2">오늘의 식단과 운동을 바탕으로 조언해드려요!</p>
-            </div>
-          )}
-          {aiFeedbackError && <div className="text-xs text-red-500 mt-2">{aiFeedbackError}</div>}
         </div>
       </div>
     );
@@ -635,37 +628,6 @@ export default function App() {
          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
            {dbMode === 'recipe' && (
              <div className="space-y-6 animate-fade-in">
-               <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl">
-                 <h3 className="text-sm font-bold text-orange-800 flex items-center mb-2">
-                   <Sparkles size={16} className="mr-1" /> AI 냉장고 파먹기 레시피
-                 </h3>
-                 <p className="text-xs text-orange-600 mb-3">집에 있는 재료를 입력하면 AI가 다이어트 레시피와 영양성분을 만들어줍니다!</p>
-                 <div className="flex gap-2">
-                   <input type="text" value={aiIngredientsInput} onChange={e => setAiIngredientsInput(e.target.value)} 
-                     placeholder="예: 닭가슴살, 양배추, 팽이버섯" 
-                     className="flex-1 p-2 bg-white border border-orange-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-orange-300" />
-                   <button onClick={getAiRecipe} disabled={isAiRecipeLoading} className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap disabled:bg-orange-300">
-                     {isAiRecipeLoading ? '생성 중...' : '생성'}
-                   </button>
-                 </div>
-                 
-                 {aiRecipeResult && (
-                   <div className="mt-4 p-3 bg-white rounded-lg shadow-sm border border-orange-100 animate-slide-up">
-                     <h4 className="font-bold text-gray-800 mb-1">{aiRecipeResult.name}</h4>
-                     <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">{aiRecipeResult.recipe_desc}</p>
-                     <div className="flex flex-wrap gap-2 text-[10px] text-gray-600 mb-3">
-                       <span className="bg-gray-100 px-2 py-1 rounded">칼로리: {aiRecipeResult.kcal}kcal</span>
-                       <span className="bg-gray-100 px-2 py-1 rounded">탄: {aiRecipeResult.carb}g</span>
-                       <span className="bg-gray-100 px-2 py-1 rounded">단: {aiRecipeResult.protein}g</span>
-                       <span className="bg-gray-100 px-2 py-1 rounded">지: {aiRecipeResult.fat}g</span>
-                     </div>
-                     <button onClick={saveAiRecipeToDB} className="w-full bg-gray-900 text-white py-2 text-xs font-bold rounded-md">
-                       내 영양정보 DB에 추가하기
-                     </button>
-                   </div>
-                 )}
-               </div>
- 
                <form onSubmit={handleAddRecipe} className="space-y-4 pt-4 border-t border-gray-100">
                  <div>
                    <label className="text-xs font-semibold text-gray-600 block mb-1">수동 레시피 이름</label>
@@ -966,14 +928,4 @@ export default function App() {
 
 
 
-export default App;
 
-return (
-  <div className="min-h-screen bg-gray-100 p-4">
-    {activeTab === 'home' && renderDashboard()}
-    {activeTab === 'diet' && renderDiet()}
-    {activeTab === 'weight' && renderWeight()}
-    {activeTab === 'exercise' && renderExercise()}
-    {activeTab === 'database' && renderDatabase()}
-  </div>
-);
