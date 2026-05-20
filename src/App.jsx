@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar } from 'lucide-react';
+import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2 } from 'lucide-react';
 
 // --- [초기 설정 및 목표] ---
 const DAILY_GOALS = { kcal: 1400, carb: 140, protein: 80, fat: 40, sugar: 25 };
@@ -13,104 +13,95 @@ const getLocalDateString = (dateObj) => {
 
 const todayStr = getLocalDateString(new Date());
 
-
+// 로컬 스토리지 초기화 유틸
+const getInitialState = (key, defaultValue) => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem(key);
+    if (saved) return JSON.parse(saved);
+  }
+  return defaultValue;
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home'); 
-  const [dbMode, setDbMode] = useState('food');
+  const [dbMode, setDbMode] = useState('single'); 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState('diet');
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
+  // 날짜 선택 상태
   const [selectedDietDate, setSelectedDietDate] = useState(todayStr);
   const [selectedWeightDate, setSelectedWeightDate] = useState(todayStr);
+  const [selectedExerciseDate, setSelectedExerciseDate] = useState(todayStr); 
+  const [selectedPlanDay, setSelectedPlanDay] = useState(new Date().getDay()); 
 
-  const [nutritionDB, setNutritionDB] = useState({
+  // 기록 수정 관련 상태
+  const [editingLogId, setEditingLogId] = useState(null);
+  const [modalDate, setModalDate] = useState(todayStr);
+  
+  // DB 수정 관련 상태
+  const [dbEditingKey, setDbEditingKey] = useState(null);
+
+  // 커스텀 알림/확인창 상태
+  const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', message: '', onConfirm: null });
+
+  const showAlert = (message) => setDialog({ isOpen: true, type: 'alert', message, onConfirm: null });
+  const showConfirm = (message, onConfirm) => setDialog({ isOpen: true, type: 'confirm', message, onConfirm });
+  const closeDialog = () => setDialog({ isOpen: false, type: 'alert', message: '', onConfirm: null });
+
+  // --- [데이터 상태 (로컬 스토리지 연동)] ---
+  const [nutritionDB, setNutritionDB] = useState(() => getInitialState('nutritionDB', {
     "고구마 1개(115g)": { kcal: 159, carb: 37.7, protein: 1.7, fat: 0.2, sugar: 0 },
     "닭가슴살 100g": { kcal: 110, carb: 0, protein: 23, fat: 1, sugar: 0 },
     "양배추 100g": { kcal: 20, carb: 5, protein: 1, fat: 0, sugar: 0 },
     "계란 1개": { kcal: 70, carb: 0.5, protein: 6, fat: 5, sugar: 0 },
     "사과 1개": { kcal: 95, carb: 25, protein: 0.5, fat: 0.3, sugar: 19 },
     "현미밥 1공기": { kcal: 300, carb: 65, protein: 6, fat: 1, sugar: 0 }
-  });
+  }));
 
-  const [exerciseDB, setExerciseDB] = useState({
+  const [exerciseDB, setExerciseDB] = useState(() => getInitialState('exerciseDB', {
     "러닝": { part: "전신", type: "유산소", time: 30 },
     "스쿼트": { part: "하체", type: "무산소", time: 15 },
     "푸시업": { part: "상체", type: "무산소", time: 10 },
     "폼롤러": { part: "전신", type: "스트레칭", time: 15 },
     "아랫배": { part: "상체", type: "무산소", time: 15 },
     "자유 헬스": { part: "전신", type: "무산소", time: 0 }
-  });
+  }));
 
-const [dietLogs, setDietLogs] = useState([]);
-  
-const [weightLogs, setWeightLogs] = useState([]);
+  const [dietLogs, setDietLogs] = useState(() => getInitialState('dietLogs', []));
+  const [weightLogs, setWeightLogs] = useState(() => getInitialState('weightLogs', []));
+  const [exerciseLogs, setExerciseLogs] = useState(() => getInitialState('exerciseLogs', []));
+  const [weeklyExercisePlan, setWeeklyExercisePlan] = useState(() => getInitialState('weeklyExercisePlan', {
+    0: [], 1: ['러닝', '스쿼트'], 2: ['푸시업', '아랫배'], 3: ['러닝'], 4: ['스쿼트', '폼롤러'], 5: ['자유 헬스'], 6: []
+  }));
 
-const [exerciseLogs, setExerciseLogs] = useState([]);
-const [weeklyExercisePlan, setWeeklyExercisePlan] = useState({
-  0: [], 1: ['러닝', '스쿼트'], 2: ['푸시업', '아랫배'], 3: ['러닝'], 4: ['스쿼트', '폼롤러'], 5: ['자유 헬스'], 6: []
-});
+  // 데이터 변경 시 로컬 스토리지 자동 저장
+  useEffect(() => localStorage.setItem('nutritionDB', JSON.stringify(nutritionDB)), [nutritionDB]);
+  useEffect(() => localStorage.setItem('exerciseDB', JSON.stringify(exerciseDB)), [exerciseDB]);
+  useEffect(() => localStorage.setItem('dietLogs', JSON.stringify(dietLogs)), [dietLogs]);
+  useEffect(() => localStorage.setItem('weightLogs', JSON.stringify(weightLogs)), [weightLogs]);
+  useEffect(() => localStorage.setItem('exerciseLogs', JSON.stringify(exerciseLogs)), [exerciseLogs]);
+  useEffect(() => localStorage.setItem('weeklyExercisePlan', JSON.stringify(weeklyExercisePlan)), [weeklyExercisePlan]);
 
   const [formData, setFormData] = useState({
-  meal: '아침',
-  menu: Object.keys(nutritionDB)[0] || '',
-  qty: 1,
-  weight: '',
-  time: '08:00',
-  restroom: false,
-  exerciseName: Object.keys(exerciseDB)[0] || '',
-  exTime: ''
-});
-
-const [recipeForm, setRecipeForm] = useState({
-  name: '',
-  ingredients: []
-});
-
-const [newIngredient, setNewIngredient] = useState({
-  menu: Object.keys(nutritionDB)[0] || '',
-  qty: 1
-});
-
-const [singleItemForm, setSingleItemForm] = useState({
-  name: '',
-  kcal: '',
-  carb: '',
-  protein: '',
-  fat: '',
-  sugar: ''
-});
-
-const [newExerciseForm, setNewExerciseForm] = useState({
-  name: '',
-  part: '전신',
-  type: '유산소',
-  time: ''
-});
-  
-const handleInputChange = (e) => {
-  const { name, value, type, checked } = e.target;
-
-  if (name === 'exerciseName') {
-    const dbEx = exerciseDB[value];
-
-    setFormData(prev => ({
-      ...prev,
-      exerciseName: value,
-      exTime: dbEx?.time > 0 ? dbEx.time : ''
-    }));
-  } else {
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
-  }
-};
-
+    meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, exerciseName: '', exTime: ''
+  });
+  const [recipeForm, setRecipeForm] = useState({ name: '', ingredients: [] });
+  const [newIngredient, setNewIngredient] = useState({ menu: Object.keys(nutritionDB)[0] || '', qty: 1 });
+  const [singleItemForm, setSingleItemForm] = useState({ name: '', kcal: '', carb: '', protein: '', fat: '', sugar: '' });
+  const [newExerciseForm, setNewExerciseForm] = useState({ name: '', part: '전신', type: '유산소', time: '' });
+    
+  const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    if (name === 'exerciseName') {
+      const dbEx = exerciseDB[value];
+      setFormData(prev => ({ ...prev, exerciseName: value, exTime: dbEx?.time > 0 ? dbEx.time : '' }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    }
+  };
 
   const getDayLogs = (logs, dateStr) => logs.filter(log => log.date === dateStr);
-
   const calculateMacros = (logs) => {
     return logs.reduce((acc, log) => {
       const info = nutritionDB[log.menu] || { kcal:0, carb:0, protein:0, fat:0, sugar:0 };
@@ -123,8 +114,6 @@ const handleInputChange = (e) => {
   };
 
   const todayMacros = calculateMacros(getDayLogs(dietLogs, todayStr));
-  const todayExercise = getDayLogs(exerciseLogs, todayStr);
-
   const amWeights = weightLogs.filter(w => parseInt(w.time.split(':')[0], 10) >= 6 && parseInt(w.time.split(':')[0], 10) < 15);
   const latestWeight = amWeights.length > 0 ? amWeights[amWeights.length - 1]?.weight : START_WEIGHT;
   const prevWeight = amWeights.length > 1 ? amWeights[amWeights.length - 2]?.weight : START_WEIGHT;
@@ -145,18 +134,102 @@ const handleInputChange = (e) => {
   }
   const recent7DaysRestroomCount = last8Weeks[7].count; 
 
+  // --- 통합 모달 관리 (신규 등록 및 수정) ---
+  const openModal = (type, existingLog = null, targetDate = todayStr) => {
+    setModalType(type);
+    setEditingLogId(existingLog ? existingLog.id : null);
+    setModalDate(existingLog ? existingLog.date : targetDate);
+
+    if (existingLog) {
+      setFormData({
+        meal: existingLog.meal || '아침',
+        menu: existingLog.menu || (Object.keys(nutritionDB)[0] || ''),
+        qty: existingLog.qty || 1,
+        weight: existingLog.weight || '',
+        time: existingLog.time || '08:00',
+        restroom: existingLog.restroom || false,
+        exerciseName: existingLog.name || (Object.keys(exerciseDB)[0] || ''),
+        exTime: existingLog.time !== undefined ? existingLog.time : ''
+      });
+    } else {
+      setFormData({
+        meal: '아침', menu: Object.keys(nutritionDB)[0] || '', qty: 1,
+        weight: '', time: '08:00', restroom: false,
+        exerciseName: Object.keys(exerciseDB)[0] || '', exTime: ''
+      });
+    }
+    setIsModalOpen(true);
+  };
+
+  // 기록 저장 처리
   const submitLog = (e) => {
     e.preventDefault();
-    const newLog = { id: Date.now(), date: todayStr };
+    const newLogId = editingLogId || Date.now();
+    const baseLog = { id: newLogId, date: modalDate };
+
     if (modalType === 'diet') {
-      setDietLogs([...dietLogs, { ...newLog, meal: formData.meal, menu: formData.menu, qty: Number(formData.qty) }]);
+      const data = { ...baseLog, meal: formData.meal, menu: formData.menu, qty: Number(formData.qty) };
+      if (editingLogId) setDietLogs(dietLogs.map(l => l.id === editingLogId ? data : l));
+      else setDietLogs([...dietLogs, data]);
+      
     } else if (modalType === 'weight') {
-      setWeightLogs([...weightLogs, { ...newLog, weight: Number(formData.weight), time: formData.time, restroom: formData.restroom }].sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
+      const data = { ...baseLog, weight: Number(formData.weight), time: formData.time, restroom: formData.restroom };
+      const newArray = editingLogId ? weightLogs.map(l => l.id === editingLogId ? data : l) : [...weightLogs, data];
+      setWeightLogs(newArray.sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
+      
     } else if (modalType === 'exercise') {
       const ex = exerciseDB[formData.exerciseName];
-      setExerciseLogs([...exerciseLogs, { ...newLog, name: formData.exerciseName, time: Number(formData.exTime), part: ex.part }]);
+      const data = { ...baseLog, name: formData.exerciseName, time: Number(formData.exTime), part: ex?.part || '전신' };
+      if (editingLogId) setExerciseLogs(exerciseLogs.map(l => l.id === editingLogId ? data : l));
+      else setExerciseLogs([...exerciseLogs, data]);
     }
     setIsModalOpen(false);
+  };
+
+  // 기록 삭제 처리 (커스텀 컨펌 사용)
+  const deleteLog = () => {
+    showConfirm("정말 이 기록을 삭제하시겠습니까?", () => {
+      if (modalType === 'diet') setDietLogs(dietLogs.filter(l => l.id !== editingLogId));
+      else if (modalType === 'weight') setWeightLogs(weightLogs.filter(l => l.id !== editingLogId));
+      else if (modalType === 'exercise') setExerciseLogs(exerciseLogs.filter(l => l.id !== editingLogId));
+      setIsModalOpen(false);
+      closeDialog();
+    });
+  };
+
+  // --- 통합 DB 항목 수정 및 삭제 ---
+  const handleEditDbItem = (type, key, info) => {
+    setDbEditingKey(key);
+    if (type === 'exercise') {
+      setDbMode('exercise');
+      setNewExerciseForm({ name: key, part: info.part, type: info.type, time: info.time || '' });
+    } else {
+      setDbMode('single');
+      setSingleItemForm({ name: key, kcal: info.kcal, carb: info.carb, protein: info.protein, fat: info.fat, sugar: info.sugar });
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelDbEdit = () => {
+    setDbEditingKey(null);
+    setSingleItemForm({ name: '', kcal: '', carb: '', protein: '', fat: '', sugar: '' });
+    setNewExerciseForm({ name: '', part: '전신', type: '유산소', time: '' });
+  };
+
+  const handleDeleteDbItem = () => {
+    showConfirm("정말 이 데이터를 삭제하시겠습니까?\n(기존 기록들의 정보가 부정확해질 수 있습니다)", () => {
+      if (dbMode === 'exercise') {
+        const newDB = {...exerciseDB};
+        delete newDB[dbEditingKey];
+        setExerciseDB(newDB);
+      } else {
+        const newDB = {...nutritionDB};
+        delete newDB[dbEditingKey];
+        setNutritionDB(newDB);
+      }
+      cancelDbEdit();
+      closeDialog();
+    });
   };
 
   const generateCalendarDays = (year, month) => {
@@ -170,11 +243,9 @@ const handleInputChange = (e) => {
 
   const handleMonthChange = (offset) => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + offset, 1));
 
-  
-
-  
-
-  
+  // ============================
+  // 각 탭 렌더링 함수
+  // ============================
 
   const renderDashboard = () => {
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
@@ -183,7 +254,6 @@ const handleInputChange = (e) => {
 
     return (
       <div className="space-y-4 pb-20 animate-fade-in flex flex-col items-center">
-        
         <div className="grid grid-cols-2 gap-4 w-full mb-1">
           <div className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative">
             <span className="text-3xl font-black tracking-tight mb-2 text-blue-600">D+48</span>
@@ -238,7 +308,6 @@ const handleInputChange = (e) => {
           </div>
         </div>
 
-        {/* 🚨 오늘의 운동 계획 알리미 (AI 코멘트 위로 이동) 🚨 */}
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 w-full mt-2">
           <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
             <h3 className="text-sm font-bold text-gray-800 flex items-center">
@@ -271,8 +340,7 @@ const handleInputChange = (e) => {
     );
   }
 
-  // ... (나머지 render 함수들 및 컴포넌트 구조는 이전과 동일)
-  const renderDiet = () => { /* ... 이전 코드와 동일 ... */
+  const renderDiet = () => { 
     const days = generateCalendarDays(currentMonth.getFullYear(), currentMonth.getMonth());
     const selectedLogs = getDayLogs(dietLogs, selectedDietDate);
     const selectedMacros = calculateMacros(selectedLogs);
@@ -330,7 +398,8 @@ const handleInputChange = (e) => {
                     {logs.map(log => {
                       const info = nutritionDB[log.menu];
                       return (
-                        <li key={log.id} className="flex justify-between text-xs items-center bg-gray-50 p-1.5 rounded">
+                        <li key={log.id} onClick={() => openModal('diet', log, selectedDietDate)} 
+                            className="flex justify-between text-xs items-center bg-gray-50 p-1.5 rounded cursor-pointer hover:bg-gray-100 transition-colors border border-transparent hover:border-gray-200">
                           <span className="text-gray-800">{log.menu} <span className="text-gray-400">x{log.qty}</span></span>
                           <span className="text-gray-500">{info ? Math.round(info.kcal * log.qty) : 0} kcal</span>
                         </li>
@@ -376,7 +445,7 @@ const handleInputChange = (e) => {
     )
   };
 
-  const renderWeight = () => { /* ... 이전 코드와 동일 ... */
+  const renderWeight = () => { 
     const days = generateCalendarDays(currentMonth.getFullYear(), currentMonth.getMonth());
     const targetDateObj = new Date(selectedWeightDate);
     const prevDateObj = new Date(targetDateObj); prevDateObj.setDate(targetDateObj.getDate() - 1);
@@ -479,6 +548,24 @@ const handleInputChange = (e) => {
           </div>
         </div>
 
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+           <h3 className="font-bold text-gray-800 text-sm mb-3">상세 기록 <span className="text-[10px] text-gray-400 font-normal ml-1">(클릭하여 수정)</span></h3>
+           {tLogs.length > 0 ? (
+             <div className="space-y-2">
+               {tLogs.map(log => (
+                 <div key={log.id} onClick={() => openModal('weight', log, selectedWeightDate)} 
+                      className="flex justify-between items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 border border-gray-100 transition-colors">
+                   <span className="text-sm text-gray-600 font-medium">{log.time}</span>
+                   <div className="flex items-center gap-3">
+                     <span className="font-bold text-blue-600">{log.weight} kg</span>
+                     {log.restroom && <Check size={16} className="text-red-500" strokeWidth={3}/>}
+                   </div>
+                 </div>
+               ))}
+             </div>
+           ) : <p className="text-xs text-gray-400 text-center py-2">해당 날짜에 기록이 없습니다.</p>}
+        </div>
+
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
           <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center">📈 최근 1달 체중 변화</h3>
           <div className="relative w-full h-36 border-b border-l border-gray-200">
@@ -518,7 +605,7 @@ const handleInputChange = (e) => {
     );
   };
 
-  const renderExercise = () => { /* ... 이전 코드와 동일 ... */
+  const renderExercise = () => { 
      const days = generateCalendarDays(currentMonth.getFullYear(), currentMonth.getMonth());
      const recent7Days = Array.from({length: 7}, (_, i) => getLocalDateString(new Date(Date.now() - i*86400000))).reverse();
  
@@ -530,6 +617,8 @@ const handleInputChange = (e) => {
          totalExTime += log.time;
        });
      });
+
+     const selectedExLogs = getDayLogs(exerciseLogs, selectedExerciseDate);
  
      return (
        <div className="space-y-6 pb-20 animate-fade-in">
@@ -547,9 +636,12 @@ const handleInputChange = (e) => {
              {days.map((dateStr, idx) => {
                if (!dateStr) return <div key={`empty-${idx}`} className="h-16"></div>;
                const exList = getDayLogs(exerciseLogs, dateStr);
+               const isSelected = dateStr === selectedExerciseDate;
                return (
-                 <div key={dateStr} className={`h-16 border rounded bg-gray-50 flex flex-col p-0.5 overflow-hidden ${dateStr === todayStr ? 'border-indigo-400 bg-indigo-50/30' : 'border-gray-100'}`}>
-                   <span className="text-[10px] text-gray-500">{parseInt(dateStr.slice(-2), 10)}</span>
+                 <div key={dateStr} onClick={() => setSelectedExerciseDate(dateStr)} 
+                      className={`h-16 border rounded bg-gray-50 flex flex-col p-0.5 overflow-hidden cursor-pointer transition-colors
+                      ${isSelected ? 'border-indigo-400 bg-indigo-50/50 shadow-inner' : 'border-gray-100 hover:bg-gray-100'}`}>
+                   <span className={`text-[10px] ${isSelected ? 'text-indigo-700 font-bold' : 'text-gray-500'}`}>{parseInt(dateStr.slice(-2), 10)}</span>
                    <div className="flex flex-col gap-0.5 mt-0.5">
                      {exList.slice(0, 2).map((ex, i) => <div key={i} className="text-[8px] bg-indigo-100 text-indigo-700 px-0.5 rounded truncate">{ex.name}</div>)}
                      {exList.length > 2 && <div className="text-[8px] text-gray-400">+{exList.length - 2}</div>}
@@ -558,6 +650,27 @@ const handleInputChange = (e) => {
                );
              })}
            </div>
+         </div>
+
+         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-100 flex justify-between items-center">
+                <h2 className="font-bold text-indigo-800 flex items-center"><Dumbbell size={18} className="mr-2"/>{selectedExerciseDate.slice(5)} 운동 기록</h2>
+            </div>
+            <div className="p-4">
+                {selectedExLogs.length > 0 ? (
+                    <ul className="space-y-2">
+                        {selectedExLogs.map(log => (
+                            <li key={log.id} onClick={() => openModal('exercise', log, selectedExerciseDate)} 
+                                className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors">
+                                <span className="font-bold text-gray-800 text-sm flex items-center">
+                                    {log.name} <span className="ml-2 text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">{log.part}</span>
+                                </span>
+                                <span className="text-xs font-bold text-indigo-500">{log.time}분</span>
+                            </li>
+                        ))}
+                    </ul>
+                ) : <p className="text-xs text-gray-400 text-center py-2">해당 날짜에 운동 기록이 없습니다.</p>}
+            </div>
          </div>
  
          <div className="grid grid-cols-2 gap-4">
@@ -592,10 +705,10 @@ const handleInputChange = (e) => {
      );
    };
  
-  const renderDatabase = () => { /* ... 이전 코드와 동일 ... */
+  const renderDatabase = () => { 
      const handleAddRecipe = (e) => {
        e.preventDefault();
-       if(recipeForm.ingredients.length === 0) return alert("재료를 추가해주세요.");
+       if(recipeForm.ingredients.length === 0) return showAlert("재료를 추가해주세요.");
        const totalNutrition = recipeForm.ingredients.reduce((acc, item) => {
          const info = nutritionDB[item.menu];
          return {
@@ -603,31 +716,44 @@ const handleInputChange = (e) => {
            protein: acc.protein + (info.protein * item.qty), fat: acc.fat + (info.fat * item.qty), sugar: acc.sugar + (info.sugar * item.qty)
          };
        }, { kcal: 0, carb: 0, protein: 0, fat: 0, sugar: 0 });
-       setNutritionDB({...nutritionDB, [recipeForm.name]: {
+       
+       const newDB = {...nutritionDB};
+       if(dbEditingKey && dbEditingKey !== recipeForm.name) delete newDB[dbEditingKey];
+       newDB[recipeForm.name] = {
          kcal: Number(totalNutrition.kcal.toFixed(1)), carb: Number(totalNutrition.carb.toFixed(1)),
          protein: Number(totalNutrition.protein.toFixed(1)), fat: Number(totalNutrition.fat.toFixed(1)), sugar: Number(totalNutrition.sugar.toFixed(1))
-       }});
+       };
+       setNutritionDB(newDB);
        setRecipeForm({ name: '', ingredients: [] });
-       alert("레시피가 저장되었습니다!");
+       setDbEditingKey(null);
+       showAlert("레시피가 저장되었습니다!");
      };
  
      const handleAddSingleItem = (e) => {
        e.preventDefault();
-       setNutritionDB({...nutritionDB, [singleItemForm.name]: {
+       const newDB = {...nutritionDB};
+       if(dbEditingKey && dbEditingKey !== singleItemForm.name) delete newDB[dbEditingKey];
+       newDB[singleItemForm.name] = {
          kcal: Number(singleItemForm.kcal), carb: Number(singleItemForm.carb),
          protein: Number(singleItemForm.protein), fat: Number(singleItemForm.fat), sugar: Number(singleItemForm.sugar)
-       }});
+       };
+       setNutritionDB(newDB);
        setSingleItemForm({ name: '', kcal: '', carb: '', protein: '', fat: '', sugar: '' });
-       alert("개별 재료가 저장되었습니다!");
+       setDbEditingKey(null);
+       showAlert(dbEditingKey ? "식재료가 수정되었습니다!" : "개별 재료가 저장되었습니다!");
      };
  
      const handleAddExercise = (e) => {
        e.preventDefault();
-       setExerciseDB({...exerciseDB, [newExerciseForm.name]: {
+       const newDB = {...exerciseDB};
+       if(dbEditingKey && dbEditingKey !== newExerciseForm.name) delete newDB[dbEditingKey];
+       newDB[newExerciseForm.name] = {
          part: newExerciseForm.part, type: newExerciseForm.type, time: Number(newExerciseForm.time) || 0
-       }});
+       };
+       setExerciseDB(newDB);
        setNewExerciseForm({ name: '', part: '전신', type: '유산소', time: '' });
-       alert("새로운 운동이 DB에 저장되었습니다!");
+       setDbEditingKey(null);
+       showAlert(dbEditingKey ? "운동 DB가 수정되었습니다!" : "새로운 운동이 DB에 저장되었습니다!");
      };
  
      const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
@@ -635,15 +761,15 @@ const handleInputChange = (e) => {
      return (
        <div className="space-y-6 pb-20 animate-fade-in">
          <div className="flex bg-gray-100 p-1 rounded-xl">
-            <button onClick={()=>setDbMode('recipe')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${dbMode === 'recipe' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>레시피</button>
-            <button onClick={()=>setDbMode('single')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${dbMode === 'single' ? 'bg-white shadow-sm text-green-600' : 'text-gray-500'}`}>식재료</button>
-            <button onClick={()=>setDbMode('exercise')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${dbMode === 'exercise' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>운동</button>
+            <button onClick={()=>{cancelDbEdit(); setDbMode('recipe');}} className={`flex-1 py-2 text-xs font-bold rounded-lg ${dbMode === 'recipe' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>레시피 등록</button>
+            <button onClick={()=>{cancelDbEdit(); setDbMode('single');}} className={`flex-1 py-2 text-xs font-bold rounded-lg ${dbMode === 'single' ? 'bg-white shadow-sm text-green-600' : 'text-gray-500'}`}>{dbEditingKey ? '식재료 수정' : '식재료 등록'}</button>
+            <button onClick={()=>{cancelDbEdit(); setDbMode('exercise');}} className={`flex-1 py-2 text-xs font-bold rounded-lg ${dbMode === 'exercise' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>{dbEditingKey ? '운동 수정' : '운동 등록'}</button>
          </div>
          
          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
            {dbMode === 'recipe' && (
              <div className="space-y-6 animate-fade-in">
-               <form onSubmit={handleAddRecipe} className="space-y-4 pt-4 border-t border-gray-100">
+               <form onSubmit={handleAddRecipe} className="space-y-4">
                  <div>
                    <label className="text-xs font-semibold text-gray-600 block mb-1">수동 레시피 이름</label>
                    <input type="text" value={recipeForm.name} onChange={e => setRecipeForm({...recipeForm, name: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="예: 양배추 참치 볶음" required />
@@ -689,14 +815,21 @@ const handleInputChange = (e) => {
                    )
                  })}
                </div>
-               <button type="submit" className="w-full bg-green-600 text-white font-bold py-3 rounded-xl text-sm mt-4">개별 재료 저장</button>
+               <div className="flex gap-2 mt-4">
+                 {dbEditingKey && (
+                    <button type="button" onClick={handleDeleteDbItem} className="w-1/4 bg-red-100 text-red-600 font-bold py-3 rounded-xl text-sm flex justify-center items-center"><Trash2 size={16}/></button>
+                 )}
+                 {dbEditingKey && (
+                    <button type="button" onClick={cancelDbEdit} className="w-1/4 bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">취소</button>
+                 )}
+                 <button type="submit" className="flex-1 bg-green-600 text-white font-bold py-3 rounded-xl text-sm">{dbEditingKey ? '수정 완료' : '재료 저장'}</button>
+               </div>
              </form>
            )}
  
            {dbMode === 'exercise' && (
              <div className="space-y-6 animate-fade-in">
                <form onSubmit={handleAddExercise} className="space-y-3">
-                 <h3 className="text-sm font-bold text-gray-800 mb-2">새로운 운동 등록</h3>
                  <div>
                    <label className="text-xs font-semibold text-gray-600 block mb-1">운동명</label>
                    <input type="text" value={newExerciseForm.name} onChange={e => setNewExerciseForm({...newExerciseForm, name: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="예: 요가" required />
@@ -719,63 +852,74 @@ const handleInputChange = (e) => {
                    <label className="text-xs font-semibold text-gray-600 block mb-1">기본 진행 시간 (선택)</label>
                    <input type="number" value={newExerciseForm.time} onChange={e => setNewExerciseForm({...newExerciseForm, time: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="입력 안할시 자유시간(0분) 저장" />
                  </div>
-                 <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm mt-4">운동 DB에 추가하기</button>
+                 <div className="flex gap-2 mt-4">
+                   {dbEditingKey && (
+                      <button type="button" onClick={handleDeleteDbItem} className="w-1/4 bg-red-100 text-red-600 font-bold py-3 rounded-xl text-sm flex justify-center items-center"><Trash2 size={16}/></button>
+                   )}
+                   {dbEditingKey && (
+                      <button type="button" onClick={cancelDbEdit} className="w-1/4 bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-sm">취소</button>
+                   )}
+                   <button type="submit" className="flex-1 bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm">{dbEditingKey ? '운동 정보 수정' : '운동 추가하기'}</button>
+                 </div>
                </form>
  
-               <div className="pt-6 border-t border-gray-100">
-                  <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center">
-                    <Calendar size={16} className="mr-1.5 text-indigo-500"/> 주간 운동 계획 설정
-                  </h3>
-                  <div className="flex justify-between bg-gray-100 p-1 rounded-lg mb-3">
-                    {dayLabels.map((d, i) => (
-                      <button key={i} type="button" onClick={() => setSelectedPlanDay(i)}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${selectedPlanDay === i ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>
-                        {d}
-                      </button>
-                    ))}
-                  </div>
-                  
-                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 h-48 overflow-y-auto">
-                    <p className="text-[10px] text-gray-500 mb-3 font-medium text-center">{dayLabels[selectedPlanDay]}요일에 진행할 운동을 선택하세요.</p>
-                    <div className="space-y-2">
-                      {Object.keys(exerciseDB).map(ex => {
-                        const isChecked = weeklyExercisePlan[selectedPlanDay].includes(ex);
-                        return (
-                          <label key={ex} className={`flex items-center bg-white p-2.5 rounded-xl border transition-colors cursor-pointer ${isChecked ? 'border-indigo-400 bg-indigo-50/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <input type="checkbox" checked={isChecked} onChange={(e) => {
-                              const currentPlan = [...weeklyExercisePlan[selectedPlanDay]];
-                              if(e.target.checked) {
-                                setWeeklyExercisePlan({...weeklyExercisePlan, [selectedPlanDay]: [...currentPlan, ex]});
-                              } else {
-                                setWeeklyExercisePlan({...weeklyExercisePlan, [selectedPlanDay]: currentPlan.filter(item => item !== ex)});
-                              }
-                            }} className="w-4 h-4 text-indigo-600 rounded mr-3" />
-                            <span className={`text-xs font-bold ${isChecked ? 'text-indigo-800' : 'text-gray-700'}`}>{ex}</span>
-                            <span className="ml-auto text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">{exerciseDB[ex].part}</span>
-                          </label>
-                        )
-                      })}
+               {!dbEditingKey && (
+                 <div className="pt-6 border-t border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center">
+                      <Calendar size={16} className="mr-1.5 text-indigo-500"/> 주간 운동 계획 설정
+                    </h3>
+                    <div className="flex justify-between bg-gray-100 p-1 rounded-lg mb-3">
+                      {dayLabels.map((d, i) => (
+                        <button key={i} type="button" onClick={() => setSelectedPlanDay(i)}
+                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${selectedPlanDay === i ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}>
+                          {d}
+                        </button>
+                      ))}
                     </div>
-                  </div>
-               </div>
+                    
+                    <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 h-48 overflow-y-auto">
+                      <p className="text-[10px] text-gray-500 mb-3 font-medium text-center">{dayLabels[selectedPlanDay]}요일에 진행할 운동을 선택하세요.</p>
+                      <div className="space-y-2">
+                        {Object.keys(exerciseDB).map(ex => {
+                          const isChecked = weeklyExercisePlan[selectedPlanDay]?.includes(ex) || false;
+                          return (
+                            <label key={ex} className={`flex items-center bg-white p-2.5 rounded-xl border transition-colors cursor-pointer ${isChecked ? 'border-indigo-400 bg-indigo-50/30' : 'border-gray-100 hover:bg-gray-50'}`}>
+                              <input type="checkbox" checked={isChecked} onChange={(e) => {
+                                const currentPlan = weeklyExercisePlan[selectedPlanDay] ? [...weeklyExercisePlan[selectedPlanDay]] : [];
+                                if(e.target.checked) {
+                                  setWeeklyExercisePlan({...weeklyExercisePlan, [selectedPlanDay]: [...currentPlan, ex]});
+                                } else {
+                                  setWeeklyExercisePlan({...weeklyExercisePlan, [selectedPlanDay]: currentPlan.filter(item => item !== ex)});
+                                }
+                              }} className="w-4 h-4 text-indigo-600 rounded mr-3" />
+                              <span className={`text-xs font-bold ${isChecked ? 'text-indigo-800' : 'text-gray-700'}`}>{ex}</span>
+                              <span className="ml-auto text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">{exerciseDB[ex].part}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                 </div>
+               )}
              </div>
            )}
          </div>
          
          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-           <h2 className="text-base font-bold text-gray-800 mb-4 border-b pb-2 flex items-center">
-             <Database size={16} className="mr-2 text-gray-500"/>{dbMode === 'exercise' ? '등록된 운동 목록' : '영양정보 DB 목록'}
+           <h2 className="text-base font-bold text-gray-800 mb-2 border-b pb-2 flex items-center justify-between">
+             <span className="flex items-center"><Database size={16} className="mr-2 text-gray-500"/>{dbMode === 'exercise' ? '등록된 운동 목록' : '영양정보 DB 목록'}</span>
            </h2>
+           <p className="text-[10px] text-gray-400 mb-3 ml-6 font-medium">항목을 클릭하여 수정/삭제할 수 있습니다.</p>
            <div className="max-h-64 overflow-y-auto space-y-2 pr-2">
              {dbMode === 'exercise' 
                ? Object.entries(exerciseDB).reverse().map(([name, info]) => (
-                   <div key={name} className="flex justify-between items-center text-sm border-b pb-2">
+                   <div key={name} onClick={() => handleEditDbItem('exercise', name, info)} className="flex justify-between items-center text-sm border-b pb-2 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors">
                      <span className="font-medium text-gray-700 truncate">{name} <span className="text-[10px] bg-gray-100 px-1 rounded ml-1">{info.part}/{info.type}</span></span>
                      <span className="text-[11px] font-bold text-indigo-500">{info.time > 0 ? `${info.time}분` : '자유입력'}</span>
                    </div>
                  ))
                : Object.entries(nutritionDB).reverse().map(([name, info]) => (
-                   <div key={name} className="flex justify-between items-center text-sm border-b pb-2">
+                   <div key={name} onClick={() => handleEditDbItem('single', name, info)} className="flex justify-between items-center text-sm border-b pb-2 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors">
                      <span className="font-medium text-gray-700 truncate w-[45%]">{name}</span>
                      <span className="text-[10px] text-gray-500 text-right">
                        {info.kcal}kcal<br/>C:{info.carb} P:{info.protein} F:{info.fat} S:{info.sugar}
@@ -789,16 +933,16 @@ const handleInputChange = (e) => {
      );
    };
  
-  const renderModal = () => { /* ... 이전 코드와 동일 ... */
+  const renderModal = () => { 
      if (!isModalOpen) return null;
      return (
        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex justify-center items-end sm:items-center p-4">
          <div className="bg-white w-full sm:w-96 rounded-2xl p-6 pb-8 shadow-2xl relative animate-slide-up">
            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={20}/></button>
            <h2 className="text-xl font-extrabold text-gray-800 mb-6 flex items-center">
-             {modalType === 'diet' ? <><Utensils className="mr-2 text-orange-500"/> 식단 기록</> : 
-              modalType === 'weight' ? <><Scale className="mr-2 text-blue-500"/> 체중 기록</> : 
-              <><Dumbbell className="mr-2 text-indigo-500"/> 운동 기록</>}
+             {modalType === 'diet' ? <><Utensils className="mr-2 text-orange-500"/> 식단 {editingLogId ? '수정' : '기록'}</> : 
+              modalType === 'weight' ? <><Scale className="mr-2 text-blue-500"/> 체중 {editingLogId ? '수정' : '기록'}</> : 
+              <><Dumbbell className="mr-2 text-indigo-500"/> 운동 {editingLogId ? '수정' : '기록'}</>}
            </h2>
  
            <form onSubmit={submitLog} className="space-y-5">
@@ -862,9 +1006,16 @@ const handleInputChange = (e) => {
                </>
              )}
  
-             <button type="submit" className="w-full mt-2 bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl transition duration-200 text-lg shadow-lg">
-               기록 저장
-             </button>
+             <div className="flex gap-3 mt-4">
+                {editingLogId && (
+                  <button type="button" onClick={deleteLog} className="w-1/4 bg-red-100 hover:bg-red-200 text-red-600 font-bold py-4 rounded-xl transition duration-200 flex justify-center items-center">
+                    <Trash2 size={20} />
+                  </button>
+                )}
+                <button type="submit" className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl transition duration-200 text-lg shadow-lg">
+                  {editingLogId ? '수정 완료' : '기록 저장'}
+                </button>
+             </div>
            </form>
          </div>
        </div>
@@ -872,7 +1023,7 @@ const handleInputChange = (e) => {
    };
  
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex justify-center">
+    <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex justify-center relative">
       <div className="w-full max-w-md bg-slate-50 relative h-screen overflow-y-auto shadow-2xl">
         <header className="bg-white/90 backdrop-blur-md pt-10 pb-4 px-6 sticky top-0 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
           <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight">
@@ -896,12 +1047,12 @@ const handleInputChange = (e) => {
           <div className="fixed bottom-24 right-4 sm:absolute sm:bottom-24 sm:right-6 z-40">
             <button 
               onClick={() => {
-                setModalType(activeTab === 'home' ? 'diet' : activeTab);
-                if(activeTab === 'exercise') {
-                  const firstEx = Object.keys(exerciseDB)[0];
-                  setFormData(prev => ({...prev, exerciseName: firstEx, exTime: exerciseDB[firstEx]?.time || '' }));
-                }
-                setIsModalOpen(true);
+                let targetDate = todayStr;
+                if (activeTab === 'diet') targetDate = selectedDietDate;
+                else if (activeTab === 'weight') targetDate = selectedWeightDate;
+                else if (activeTab === 'exercise') targetDate = selectedExerciseDate;
+                
+                openModal(activeTab === 'home' ? 'diet' : activeTab, null, targetDate);
               }}
               className="bg-gray-900 hover:bg-black text-white rounded-full p-4 shadow-xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
             >
@@ -930,17 +1081,34 @@ const handleInputChange = (e) => {
         </nav>
         {renderModal()}
       </div>
+
+      {/* --- 커스텀 다이얼로그 (확인창/안림창) --- */}
+      {dialog.isOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex justify-center items-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-[320px] shadow-2xl text-center transform scale-100 transition-transform">
+            <p className="text-gray-800 text-sm font-bold mb-6 whitespace-pre-line leading-relaxed">{dialog.message}</p>
+            <div className="flex gap-3 justify-center">
+              {dialog.type === 'confirm' && (
+                <button onClick={closeDialog} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">
+                  취소
+                </button>
+              )}
+              <button onClick={() => { if(dialog.onConfirm) dialog.onConfirm(); else closeDialog(); }} 
+                      className="flex-1 py-3 rounded-xl bg-gray-900 text-white font-bold hover:bg-black transition-colors shadow-md">
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style dangerouslySetInnerHTML={{__html: `
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 16px); }
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0;} to { transform: translateY(0); opacity: 1;} }
         .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
       `}} />
     </div>
   );
 }
-
-
-
-
