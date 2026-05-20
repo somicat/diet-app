@@ -17,6 +17,7 @@ const todayStr = getLocalDateString(new Date());
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home'); 
+  const [dbMode, setDbMode] = useState('food');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState('diet');
   const [currentMonth, setCurrentMonth] = useState(new Date());
