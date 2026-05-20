@@ -43,38 +43,52 @@ export default function App() {
     "자유 헬스": { part: "전신", type: "무산소", time: 0 }
   });
 
-  const [dietLogs, setDietLogs] = useState([
-    { id: 1, date: todayStr, meal: '아침', menu: '고구마 1개(115g)', qty: 1 },
-    { id: 2, date: todayStr, meal: '점심', menu: '현미밥 1공기', qty: 1 },
-    { id: 3, date: todayStr, meal: '점심', menu: '닭가슴살 100g', qty: 1 }
-  ]);
+const [dietLogs, setDietLogs] = useState([]);
   
-  const generateMockWeights = () => {
-    let logs = [];
-    let curWeight = START_WEIGHT;
-    for(let i=60; i>=1; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      curWeight = curWeight + (Math.random() * 0.4 - 0.2); 
-      logs.push({
-        id: Date.now() + i, date: getLocalDateString(d), time: '08:00',
-        weight: Number(curWeight.toFixed(2)), restroom: Math.random() > 0.6 
-      });
-    }
-    logs.push({ id: Date.now()+100, date: todayStr, time: '08:00', weight: curWeight - 0.2, restroom: true });
-    logs.push({ id: Date.now()+101, date: todayStr, time: '18:00', weight: curWeight + 0.1, restroom: false });
-    return logs;
-  };
-  const [weightLogs, setWeightLogs] = useState(generateMockWeights());
+const [weightLogs, setWeightLogs] = useState([]);
 
-  const [exerciseLogs, setExerciseLogs] = useState([
-    { id: 1, date: todayStr, name: '러닝', time: 30, part: '전신' },
-    { id: 2, date: todayStr, name: '스쿼트', time: 15, part: '하체' }
-  ]);
+const [exerciseLogs, setExerciseLogs] = useState([]);
+const [weeklyExercisePlan, setWeeklyExercisePlan] = useState({
+  0: [], 1: ['러닝', '스쿼트'], 2: ['푸시업', '아랫배'], 3: ['러닝'], 4: ['스쿼트', '폼롤러'], 5: ['자유 헬스'], 6: []
+});
 
-  const [selectedPlanDay, setSelectedPlanDay] = useState(1);
-  const [weeklyExercisePlan, setWeeklyExercisePlan] = useState({
-    0: [], 1: ['러닝', '스쿼트'], 2: ['푸시업', '아랫배'], 3: ['러닝'], 4: ['스쿼트', '폼롤러'], 5: ['자유 헬스'], 6: []
-  });
+  const [formData, setFormData] = useState({
+  meal: '아침',
+  menu: Object.keys(nutritionDB)[0] || '',
+  qty: 1,
+  weight: '',
+  time: '08:00',
+  restroom: false,
+  exerciseName: Object.keys(exerciseDB)[0] || '',
+  exTime: ''
+});
+
+const [recipeForm, setRecipeForm] = useState({
+  name: '',
+  ingredients: []
+});
+
+const [newIngredient, setNewIngredient] = useState({
+  menu: Object.keys(nutritionDB)[0] || '',
+  qty: 1
+});
+
+const [singleItemForm, setSingleItemForm] = useState({
+  name: '',
+  kcal: '',
+  carb: '',
+  protein: '',
+  fat: '',
+  sugar: ''
+});
+
+const [newExerciseForm, setNewExerciseForm] = useState({
+  name: '',
+  part: '전신',
+  type: '유산소',
+  time: ''
+});
+  
 const handleInputChange = (e) => {
   const { name, value, type, checked } = e.target;
 
