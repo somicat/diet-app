@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings } from 'lucide-react';
+import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings, Edit3 } from 'lucide-react';
 
 // --- [초기 설정 및 목표] ---
 const START_WEIGHT = 52.0;
@@ -293,6 +293,46 @@ export default function App() {
       if (diffDays === 0) return { text: "D-Day", subText: "다이어트 목표까지" };
       return { text: `D-${diffDays}`, subText: "다이어트 목표까지" };
     }
+  };
+
+  // ============================
+  // 헤더 렌더링 함수
+  // ============================
+  const renderHeader = () => {
+    let title = '';
+    let buttonConfig = null;
+
+    if (activeTab === 'home') title = '오늘의 요약';
+    else if (activeTab === 'database') title = '종합 DB';
+    else if (activeTab === 'diet') {
+      title = '식단 분석';
+      buttonConfig = { label: '식단 기록', type: 'diet', date: selectedDietDate };
+    }
+    else if (activeTab === 'weight') {
+      title = '체중 관리';
+      buttonConfig = { label: '체중 기록', type: 'weight', date: selectedWeightDate };
+    }
+    else if (activeTab === 'exercise') {
+      title = '운동 일지';
+      buttonConfig = { label: '운동 기록', type: 'exercise', date: selectedExerciseDate };
+    }
+
+    return (
+      <header className="bg-white/90 backdrop-blur-md pt-10 pb-4 px-6 sticky top-0 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex justify-between items-center">
+        <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight">
+          {title}
+        </h1>
+        {buttonConfig && (
+          <button 
+            onClick={() => openModal(buttonConfig.type, null, buttonConfig.date)}
+            className="flex items-center gap-1.5 bg-gray-900 hover:bg-black text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors shadow-sm"
+          >
+            <Edit3 size={16} />
+            {buttonConfig.label}
+          </button>
+        )}
+      </header>
+    );
   };
 
   // ============================
@@ -1142,15 +1182,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 flex justify-center relative">
       <div className="w-full max-w-md bg-slate-50 relative h-screen overflow-y-auto shadow-2xl">
-        <header className="bg-white/90 backdrop-blur-md pt-10 pb-4 px-6 sticky top-0 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-          <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight">
-            {activeTab === 'home' && '오늘의 요약'}
-            {activeTab === 'diet' && '식단 분석'}
-            {activeTab === 'weight' && '체중 관리'}
-            {activeTab === 'exercise' && '운동 일지'}
-            {activeTab === 'database' && '종합 DB'}
-          </h1>
-        </header>
+        {renderHeader()}
 
         <main className="p-5">
           {activeTab === 'home' && renderDashboard()}
@@ -1159,24 +1191,6 @@ export default function App() {
           {activeTab === 'exercise' && renderExercise()}
           {activeTab === 'database' && renderDatabase()}
         </main>
-
-        {activeTab !== 'database' && (
-          <div className="fixed bottom-24 right-4 sm:absolute sm:bottom-24 sm:right-6 z-40">
-            <button 
-              onClick={() => {
-                let targetDate = todayStr;
-                if (activeTab === 'diet') targetDate = selectedDietDate;
-                else if (activeTab === 'weight') targetDate = selectedWeightDate;
-                else if (activeTab === 'exercise') targetDate = selectedExerciseDate;
-                
-                openModal(activeTab === 'home' ? 'diet' : activeTab, null, targetDate);
-              }}
-              className="bg-gray-900 hover:bg-black text-white rounded-full p-4 shadow-xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
-            >
-              <Plus size={28} strokeWidth={3} />
-            </button>
-          </div>
-        )}
 
         <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 flex justify-around items-center pb-safe z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
           {[
