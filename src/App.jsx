@@ -50,6 +50,8 @@ export default function App() {
   const closeDialog = () => setDialog({ isOpen: false, type: 'alert', message: '', onConfirm: null });
 
   // --- [데이터 상태 (로컬 스토리지 연동)] ---
+  const [dDayConfig, setDDayConfig] = useState(() => getInitialState('dDayConfig', { date: todayStr, type: 'start' }));
+
   const [nutritionDB, setNutritionDB] = useState(() => getInitialState('nutritionDB', {
     "고구마 1개(115g)": { kcal: 159, carb: 37.7, protein: 1.7, fat: 0.2, sugar: 0 },
     "닭가슴살 100g": { kcal: 110, carb: 0, protein: 23, fat: 1, sugar: 0 },
@@ -76,6 +78,7 @@ export default function App() {
   }));
 
   // 데이터 변경 시 로컬 스토리지 자동 저장
+  useEffect(() => localStorage.setItem('dDayConfig', JSON.stringify(dDayConfig)), [dDayConfig]);
   useEffect(() => localStorage.setItem('nutritionDB', JSON.stringify(nutritionDB)), [nutritionDB]);
   useEffect(() => localStorage.setItem('exerciseDB', JSON.stringify(exerciseDB)), [exerciseDB]);
   useEffect(() => localStorage.setItem('dietLogs', JSON.stringify(dietLogs)), [dietLogs]);
@@ -84,7 +87,8 @@ export default function App() {
   useEffect(() => localStorage.setItem('weeklyExercisePlan', JSON.stringify(weeklyExercisePlan)), [weeklyExercisePlan]);
 
   const [formData, setFormData] = useState({
-    meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, exerciseName: '', exTime: ''
+    meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, exerciseName: '', exTime: '',
+    ddayType: 'start', ddayDate: todayStr
   });
   const [recipeForm, setRecipeForm] = useState({ name: '', ingredients: [] });
   const [newIngredient, setNewIngredient] = useState({ menu: Object.keys(nutritionDB)[0] || '', qty: 1 });
@@ -140,8 +144,11 @@ export default function App() {
     setEditingLogId(existingLog ? existingLog.id : null);
     setModalDate(existingLog ? existingLog.date : targetDate);
 
-    if (existingLog) {
-      setFormData({
+    if (type === 'dday') {
+      setFormData(prev => ({ ...prev, ddayType: dDayConfig.type || 'start', ddayDate: dDayConfig.date || todayStr }));
+    } else if (existingLog) {
+      setFormData(prev => ({
+        ...prev,
         meal: existingLog.meal || '아침',
         menu: existingLog.menu || (Object.keys(nutritionDB)[0] || ''),
         qty: existingLog.qty || 1,
@@ -150,13 +157,14 @@ export default function App() {
         restroom: existingLog.restroom || false,
         exerciseName: existingLog.name || (Object.keys(exerciseDB)[0] || ''),
         exTime: existingLog.time !== undefined ? existingLog.time : ''
-      });
+      }));
     } else {
-      setFormData({
+      setFormData(prev => ({
+        ...prev,
         meal: '아침', menu: Object.keys(nutritionDB)[0] || '', qty: 1,
         weight: '', time: '08:00', restroom: false,
         exerciseName: Object.keys(exerciseDB)[0] || '', exTime: ''
-      });
+      }));
     }
     setIsModalOpen(true);
   };
@@ -164,6 +172,13 @@ export default function App() {
   // 기록 저장 처리
   const submitLog = (e) => {
     e.preventDefault();
+    
+    if (modalType === 'dday') {
+      setDDayConfig({ type: formData.ddayType, date: formData.ddayDate });
+      setIsModalOpen(false);
+      return;
+    }
+
     const newLogId = editingLogId || Date.now();
     const baseLog = { id: newLogId, date: modalDate };
 
@@ -243,6 +258,27 @@ export default function App() {
 
   const handleMonthChange = (offset) => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + offset, 1));
 
+  // --- D-day 계산 로직 ---
+  const getDdayInfo = () => {
+    if (!dDayConfig.date) return { text: "D-Day", subText: "다이어트 시작한지" };
+    
+    const today = new Date(todayStr);
+    const target = new Date(dDayConfig.date);
+    const diffTime = target.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+    if (dDayConfig.type === 'start') {
+      const passed = -diffDays;
+      if (passed < 0) return { text: `D${passed}`, subText: "다이어트 시작 전" }; 
+      if (passed === 0) return { text: "D-Day", subText: "다이어트 시작한지" };
+      return { text: `D+${passed}`, subText: "다이어트 시작한지" };
+    } else { 
+      if (diffDays < 0) return { text: `D+${-diffDays}`, subText: "목표일 지남" };
+      if (diffDays === 0) return { text: "D-Day", subText: "다이어트 목표까지" };
+      return { text: `D-${diffDays}`, subText: "다이어트 목표까지" };
+    }
+  };
+
   // ============================
   // 각 탭 렌더링 함수
   // ============================
@@ -251,13 +287,15 @@ export default function App() {
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
     const todayIdx = new Date().getDay();
     const todaysPlan = weeklyExercisePlan[todayIdx] || [];
+    const dDayInfo = getDdayInfo();
 
     return (
       <div className="space-y-4 pb-20 animate-fade-in flex flex-col items-center">
         <div className="grid grid-cols-2 gap-4 w-full mb-1">
-          <div className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative">
-            <span className="text-3xl font-black tracking-tight mb-2 text-blue-600">D+48</span>
-            <span className="text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-3 py-1 rounded-full">감량기 목표까지</span>
+          <div onClick={() => openModal('dday')} className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative cursor-pointer hover:bg-gray-50 transition-colors group">
+            <span className="text-3xl font-black tracking-tight mb-2 text-blue-600">{dDayInfo.text}</span>
+            <span className="text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-3 py-1 rounded-full group-hover:bg-blue-100 transition-colors">{dDayInfo.subText}</span>
+            <Calendar size={14} className="absolute top-3 right-3 text-gray-300 group-hover:text-blue-500 transition-colors" />
           </div>
           <div className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative">
             <span className="text-[11px] font-bold text-gray-400 mb-1">오늘의 체중</span>
@@ -940,12 +978,32 @@ export default function App() {
          <div className="bg-white w-full sm:w-96 rounded-2xl p-6 pb-8 shadow-2xl relative animate-slide-up">
            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={20}/></button>
            <h2 className="text-xl font-extrabold text-gray-800 mb-6 flex items-center">
-             {modalType === 'diet' ? <><Utensils className="mr-2 text-orange-500"/> 식단 {editingLogId ? '수정' : '기록'}</> : 
+             {modalType === 'dday' ? <><Calendar className="mr-2 text-blue-500"/> 디데이 설정</> : 
+              modalType === 'diet' ? <><Utensils className="mr-2 text-orange-500"/> 식단 {editingLogId ? '수정' : '기록'}</> : 
               modalType === 'weight' ? <><Scale className="mr-2 text-blue-500"/> 체중 {editingLogId ? '수정' : '기록'}</> : 
               <><Dumbbell className="mr-2 text-indigo-500"/> 운동 {editingLogId ? '수정' : '기록'}</>}
            </h2>
  
            <form onSubmit={submitLog} className="space-y-5">
+             {modalType === 'dday' && (
+               <>
+                 <div className="flex gap-2 mb-4">
+                   <button type="button" onClick={() => setFormData({...formData, ddayType: 'start'})} 
+                           className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${formData.ddayType === 'start' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-500 border border-gray-200'}`}>
+                     다이어트 시작일
+                   </button>
+                   <button type="button" onClick={() => setFormData({...formData, ddayType: 'goal'})} 
+                           className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${formData.ddayType === 'goal' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-500 border border-gray-200'}`}>
+                     다이어트 목표일
+                   </button>
+                 </div>
+                 <div>
+                   <label className="block text-sm font-bold text-gray-700 mb-1">날짜 선택</label>
+                   <input type="date" name="ddayDate" value={formData.ddayDate} onChange={handleInputChange} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-300" required />
+                 </div>
+               </>
+             )}
+
              {modalType === 'diet' && (
                <>
                  <div>
@@ -1007,13 +1065,13 @@ export default function App() {
              )}
  
              <div className="flex gap-3 mt-4">
-                {editingLogId && (
+                {editingLogId && modalType !== 'dday' && (
                   <button type="button" onClick={deleteLog} className="w-1/4 bg-red-100 hover:bg-red-200 text-red-600 font-bold py-4 rounded-xl transition duration-200 flex justify-center items-center">
                     <Trash2 size={20} />
                   </button>
                 )}
                 <button type="submit" className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl transition duration-200 text-lg shadow-lg">
-                  {editingLogId ? '수정 완료' : '기록 저장'}
+                  {modalType === 'dday' ? '설정 저장' : (editingLogId ? '수정 완료' : '기록 저장')}
                 </button>
              </div>
            </form>
