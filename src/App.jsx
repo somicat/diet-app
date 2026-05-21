@@ -52,6 +52,7 @@ export default function App() {
   const [sharedSearchTerm, setSharedSearchTerm] = useState('');
   const [sharedResults, setSharedResults] = useState([]);
   const [isSharedLoading, setIsSharedLoading] = useState(false);
+  const [publishToSharedDb, setPublishToSharedDb] = useState(true);
 
   // 커스텀 알림/확인창 상태
   const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', message: '', onConfirm: null });
@@ -131,9 +132,12 @@ export default function App() {
 
     const loadPersonalDb = async () => {
       try {
-        const [nutritionSnap, exerciseSnap] = await Promise.all([
+        const [nutritionSnap, exerciseSnap, dietSnap, weightSnap, exerciseLogSnap] = await Promise.all([
           getDocs(collection(db, 'users', currentUser.uid, 'nutritionDB')),
           getDocs(collection(db, 'users', currentUser.uid, 'exerciseDB')),
+          getDocs(collection(db, 'users', currentUser.uid, 'dietLogs')),
+          getDocs(collection(db, 'users', currentUser.uid, 'weightLogs')),
+          getDocs(collection(db, 'users', currentUser.uid, 'exerciseLogs')),
         ]);
 
         const cloudNutrition = {};
@@ -163,6 +167,20 @@ export default function App() {
         }
         if (Object.keys(cloudExercise).length > 0) {
           setExerciseDB((prev) => ({ ...prev, ...cloudExercise }));
+        }
+
+        const cloudDietLogs = dietSnap.docs.map((itemDoc) => itemDoc.data());
+        const cloudWeightLogs = weightSnap.docs.map((itemDoc) => itemDoc.data());
+        const cloudExerciseLogs = exerciseLogSnap.docs.map((itemDoc) => itemDoc.data());
+
+        if (cloudDietLogs.length > 0) {
+          setDietLogs(cloudDietLogs.sort((a, b) => a.date.localeCompare(b.date)));
+        }
+        if (cloudWeightLogs.length > 0) {
+          setWeightLogs(cloudWeightLogs.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
+        }
+        if (cloudExerciseLogs.length > 0) {
+          setExerciseLogs(cloudExerciseLogs.sort((a, b) => a.date.localeCompare(b.date)));
         }
       } catch (error) {
         console.error('Load personal Firestore DB failed:', error);
@@ -272,7 +290,7 @@ export default function App() {
   };
 
   // 기록 저장 처리
-  const submitLog = (e) => {
+  const submitLog = async (e) => {
     e.preventDefault();
     
     if (modalType === 'dday-start') {
@@ -303,17 +321,35 @@ export default function App() {
       const data = { ...baseLog, meal: formData.meal, menu: formData.menu, qty: Number(formData.qty) };
       if (editingLogId) setDietLogs(dietLogs.map(l => l.id === editingLogId ? data : l));
       else setDietLogs([...dietLogs, data]);
+      try {
+        await saveUserLog('diet', data);
+      } catch (error) {
+        console.error('Save diet log to Firestore failed:', error);
+        showAlert('로컬에는 저장했지만 Firestore 식단 기록 저장에 실패했습니다.');
+      }
       
     } else if (modalType === 'weight') {
       const data = { ...baseLog, weight: Number(formData.weight), time: formData.time, restroom: formData.restroom, memo: formData.memo };
       const newArray = editingLogId ? weightLogs.map(l => l.id === editingLogId ? data : l) : [...weightLogs, data];
       setWeightLogs(newArray.sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
+      try {
+        await saveUserLog('weight', data);
+      } catch (error) {
+        console.error('Save weight log to Firestore failed:', error);
+        showAlert('로컬에는 저장했지만 Firestore 체중 기록 저장에 실패했습니다.');
+      }
       
     } else if (modalType === 'exercise') {
       const ex = exerciseDB[formData.exerciseName];
       const data = { ...baseLog, name: formData.exerciseName, time: Number(formData.exTime), part: ex?.part || '전신' };
       if (editingLogId) setExerciseLogs(exerciseLogs.map(l => l.id === editingLogId ? data : l));
       else setExerciseLogs([...exerciseLogs, data]);
+      try {
+        await saveUserLog('exercise', data);
+      } catch (error) {
+        console.error('Save exercise log to Firestore failed:', error);
+        showAlert('로컬에는 저장했지만 Firestore 운동 기록 저장에 실패했습니다.');
+      }
     }
     setIsModalOpen(false);
   };
@@ -324,6 +360,10 @@ export default function App() {
       if (modalType === 'diet') setDietLogs(dietLogs.filter(l => l.id !== editingLogId));
       else if (modalType === 'weight') setWeightLogs(weightLogs.filter(l => l.id !== editingLogId));
       else if (modalType === 'exercise') setExerciseLogs(exerciseLogs.filter(l => l.id !== editingLogId));
+      deleteUserLog(modalType, editingLogId).catch((error) => {
+        console.error('Delete Firestore log failed:', error);
+        showAlert('로컬에서는 삭제했지만 Firestore 기록 삭제에 실패했습니다.');
+      });
       setIsModalOpen(false);
       closeDialog();
     });
@@ -345,6 +385,7 @@ export default function App() {
   const cancelDbEdit = () => {
     setDbEditingKey(null);
     setSingleItemForm({ name: '', kcal: '', carb: '', protein: '', fat: '', sugar: '' });
+    setPublishToSharedDb(true);
     setNewExerciseForm({ name: '', part: '전신', type: '유산소', time: '' });
   };
 
@@ -379,6 +420,7 @@ export default function App() {
       name,
       source,
       ownerId: currentUser.uid,
+      isPublic: publish,
       searchName: normalizeSearchTerm(name),
       updatedAt: serverTimestamp(),
     };
@@ -387,6 +429,10 @@ export default function App() {
 
     if (publish) {
       await setDoc(doc(db, 'publicNutritionDB', `${currentUser.uid}_${docId}`), payload, { merge: true });
+    } else {
+      await deleteDoc(doc(db, 'publicNutritionDB', `${currentUser.uid}_${docId}`)).catch((error) => {
+        console.warn('Skip public nutrition delete:', error);
+      });
     }
   };
 
@@ -398,6 +444,7 @@ export default function App() {
       ...info,
       name,
       ownerId: currentUser.uid,
+      isPublic: publish,
       searchName: normalizeSearchTerm(name),
       updatedAt: serverTimestamp(),
     };
@@ -406,6 +453,10 @@ export default function App() {
 
     if (publish) {
       await setDoc(doc(db, 'publicExerciseDB', `${currentUser.uid}_${docId}`), payload, { merge: true });
+    } else {
+      await deleteDoc(doc(db, 'publicExerciseDB', `${currentUser.uid}_${docId}`)).catch((error) => {
+        console.warn('Skip public exercise delete:', error);
+      });
     }
   };
 
@@ -420,6 +471,31 @@ export default function App() {
       deleteDoc(doc(db, 'users', currentUser.uid, privatePath, docId)),
       deleteDoc(doc(db, publicPath, `${currentUser.uid}_${docId}`)),
     ]);
+  };
+
+  const getLogCollectionName = (type) => {
+    if (type === 'diet') return 'dietLogs';
+    if (type === 'weight') return 'weightLogs';
+    return 'exerciseLogs';
+  };
+
+  const saveUserLog = async (type, data) => {
+    if (!currentUser || !data?.id) return;
+
+    await setDoc(
+      doc(db, 'users', currentUser.uid, getLogCollectionName(type), String(data.id)),
+      {
+        ...data,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  };
+
+  const deleteUserLog = async (type, id) => {
+    if (!currentUser || !id) return;
+
+    await deleteDoc(doc(db, 'users', currentUser.uid, getLogCollectionName(type), String(id)));
   };
 
   const searchSharedDb = async () => {
@@ -1094,7 +1170,7 @@ export default function App() {
          if (dbEditingKey && dbEditingKey !== recipeForm.name) {
            await deletePersonalDbItem('nutrition', dbEditingKey);
          }
-         await savePersonalNutritionItem(recipeForm.name, newDB[recipeForm.name], 'recipe', true);
+         await savePersonalNutritionItem(recipeForm.name, newDB[recipeForm.name], 'recipe', publishToSharedDb);
        } catch (error) {
          console.error('Save recipe to Firestore failed:', error);
          showAlert('로컬에는 저장했지만 Firestore 저장에 실패했습니다.');
@@ -1102,6 +1178,7 @@ export default function App() {
        }
        setRecipeForm({ name: '', ingredients: [] });
        setDbEditingKey(null);
+       setPublishToSharedDb(true);
        showAlert("레시피가 저장되었습니다!");
      };
  
@@ -1118,7 +1195,7 @@ export default function App() {
          if (dbEditingKey && dbEditingKey !== singleItemForm.name) {
            await deletePersonalDbItem('nutrition', dbEditingKey);
          }
-         await savePersonalNutritionItem(singleItemForm.name, newDB[singleItemForm.name], 'single', true);
+         await savePersonalNutritionItem(singleItemForm.name, newDB[singleItemForm.name], 'single', publishToSharedDb);
        } catch (error) {
          console.error('Save nutrition item to Firestore failed:', error);
          showAlert('로컬에는 저장했지만 Firestore 저장에 실패했습니다.');
@@ -1141,7 +1218,7 @@ export default function App() {
          if (dbEditingKey && dbEditingKey !== newExerciseForm.name) {
            await deletePersonalDbItem('exercise', dbEditingKey);
          }
-         await savePersonalExerciseItem(newExerciseForm.name, newDB[newExerciseForm.name], true);
+         await savePersonalExerciseItem(newExerciseForm.name, newDB[newExerciseForm.name], publishToSharedDb);
        } catch (error) {
          console.error('Save exercise item to Firestore failed:', error);
          showAlert('로컬에는 저장했지만 Firestore 저장에 실패했습니다.');
@@ -1153,6 +1230,20 @@ export default function App() {
      };
  
      const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+     const publishControl = (
+       <label className="flex items-start gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer">
+         <input
+           type="checkbox"
+           checked={publishToSharedDb}
+           onChange={(e) => setPublishToSharedDb(e.target.checked)}
+           className="mt-0.5 w-4 h-4 text-emerald-600 rounded"
+         />
+         <span className="text-xs text-gray-600 leading-relaxed">
+           <span className="font-bold text-gray-800">공유 DB에도 공개</span><br />
+           체크하면 다른 사용자가 검색해서 가져올 수 있습니다.
+         </span>
+       </label>
+     );
  
      return (
        <div className="space-y-6 pb-20 animate-fade-in">
@@ -1189,6 +1280,7 @@ export default function App() {
                      ))}
                    </ul>
                  </div>
+                 {publishControl}
                  <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl text-sm">레시피 저장</button>
                </form>
              </div>
@@ -1211,6 +1303,7 @@ export default function App() {
                    )
                  })}
                </div>
+               {publishControl}
                <div className="flex gap-2 mt-4">
                  {dbEditingKey && (
                     <button type="button" onClick={handleDeleteDbItem} className="w-1/4 bg-red-100 text-red-600 font-bold py-3 rounded-xl text-sm flex justify-center items-center"><Trash2 size={16}/></button>
@@ -1248,6 +1341,7 @@ export default function App() {
                    <label className="text-xs font-semibold text-gray-600 block mb-1">기본 진행 시간 (선택)</label>
                    <input type="number" value={newExerciseForm.time} onChange={e => setNewExerciseForm({...newExerciseForm, time: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="입력 안할시 자유시간(0분) 저장" />
                  </div>
+                 {publishControl}
                  <div className="flex gap-2 mt-4">
                    {dbEditingKey && (
                       <button type="button" onClick={handleDeleteDbItem} className="w-1/4 bg-red-100 text-red-600 font-bold py-3 rounded-xl text-sm flex justify-center items-center"><Trash2 size={16}/></button>
@@ -1324,7 +1418,7 @@ export default function App() {
              </button>
            </div>
            <p className="text-[10px] text-gray-400 mb-3 font-medium">
-             직접 등록한 항목은 내 DB에 저장되고 공유 DB에도 등록됩니다. 검색한 항목은 가져오기로 내 DB에 복사할 수 있습니다.
+             공개 옵션을 체크한 항목만 공유 DB에 등록됩니다. 검색한 항목은 가져오기로 내 DB에 복사할 수 있습니다.
            </p>
            <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
              {sharedResults.length === 0 ? (
