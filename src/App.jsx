@@ -1,7 +1,8 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings, Edit3 } from 'lucide-react';
+import { collection, deleteDoc, doc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { auth, db } from './firebase';
 
 
 // 날짜 포맷 유틸
@@ -11,6 +12,9 @@ const getLocalDateString = (dateObj) => {
 };
 
 const todayStr = getLocalDateString(new Date());
+
+const normalizeSearchTerm = (value = '') => value.trim().toLowerCase();
+const makeDbDocId = (name = '') => encodeURIComponent(normalizeSearchTerm(name)).replace(/\./g, '%2E');
 
 // 로컬 스토리지 초기화 유틸
 const getInitialState = (key, defaultValue) => {
@@ -43,6 +47,11 @@ export default function App() {
   
   // DB 수정 관련 상태
   const [dbEditingKey, setDbEditingKey] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isFirestoreReady, setIsFirestoreReady] = useState(false);
+  const [sharedSearchTerm, setSharedSearchTerm] = useState('');
+  const [sharedResults, setSharedResults] = useState([]);
+  const [isSharedLoading, setIsSharedLoading] = useState(false);
 
   // 커스텀 알림/확인창 상태
   const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', message: '', onConfirm: null });
@@ -98,6 +107,76 @@ export default function App() {
   useEffect(() => localStorage.setItem('weightLogs', JSON.stringify(weightLogs)), [weightLogs]);
   useEffect(() => localStorage.setItem('exerciseLogs', JSON.stringify(exerciseLogs)), [exerciseLogs]);
   useEffect(() => localStorage.setItem('weeklyExercisePlan', JSON.stringify(weeklyExercisePlan)), [weeklyExercisePlan]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUser(user);
+        setIsFirestoreReady(true);
+        return;
+      }
+
+      signInAnonymously(auth).catch((error) => {
+        console.error('Firebase anonymous auth failed:', error);
+        setIsFirestoreReady(false);
+        showAlert('Firestore 로그인에 실패했습니다. Firebase Auth의 익명 로그인을 켜주세요.');
+      });
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const loadPersonalDb = async () => {
+      try {
+        const [nutritionSnap, exerciseSnap] = await Promise.all([
+          getDocs(collection(db, 'users', currentUser.uid, 'nutritionDB')),
+          getDocs(collection(db, 'users', currentUser.uid, 'exerciseDB')),
+        ]);
+
+        const cloudNutrition = {};
+        nutritionSnap.forEach((itemDoc) => {
+          const data = itemDoc.data();
+          cloudNutrition[data.name] = {
+            kcal: data.kcal,
+            carb: data.carb,
+            protein: data.protein,
+            fat: data.fat,
+            sugar: data.sugar,
+          };
+        });
+
+        const cloudExercise = {};
+        exerciseSnap.forEach((itemDoc) => {
+          const data = itemDoc.data();
+          cloudExercise[data.name] = {
+            part: data.part,
+            type: data.type,
+            time: data.time,
+          };
+        });
+
+        if (Object.keys(cloudNutrition).length > 0) {
+          setNutritionDB((prev) => ({ ...prev, ...cloudNutrition }));
+        }
+        if (Object.keys(cloudExercise).length > 0) {
+          setExerciseDB((prev) => ({ ...prev, ...cloudExercise }));
+        }
+      } catch (error) {
+        console.error('Load personal Firestore DB failed:', error);
+        showAlert('Firestore 개인 DB를 불러오지 못했습니다. 네트워크와 보안 규칙을 확인해주세요.');
+      }
+    };
+
+    loadPersonalDb();
+  }, [currentUser]);
+
+  useEffect(() => {
+    setSharedSearchTerm('');
+    setSharedResults([]);
+  }, [dbMode]);
 
   const [formData, setFormData] = useState({
     meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, memo: '', exerciseName: '', exTime: '',
@@ -270,7 +349,7 @@ export default function App() {
   };
 
   const handleDeleteDbItem = () => {
-    showConfirm("정말 이 데이터를 삭제하시겠습니까?\n(기존 기록들의 정보가 부정확해질 수 있습니다)", () => {
+    showConfirm("정말 이 데이터를 삭제하시겠습니까?\n(기존 기록들의 정보가 부정확해질 수 있습니다)", async () => {
       if (dbMode === 'exercise') {
         const newDB = {...exerciseDB};
         delete newDB[dbEditingKey];
@@ -280,9 +359,128 @@ export default function App() {
         delete newDB[dbEditingKey];
         setNutritionDB(newDB);
       }
+      try {
+        await deletePersonalDbItem(dbMode === 'exercise' ? 'exercise' : 'nutrition', dbEditingKey);
+      } catch (error) {
+        console.error('Delete Firestore DB item failed:', error);
+        showAlert('로컬 DB에서는 삭제했지만 Firestore 삭제에 실패했습니다.');
+      }
       cancelDbEdit();
       closeDialog();
     });
+  };
+
+  const savePersonalNutritionItem = async (name, info, source = 'single', publish = true) => {
+    if (!currentUser) return;
+
+    const docId = makeDbDocId(name);
+    const payload = {
+      ...info,
+      name,
+      source,
+      ownerId: currentUser.uid,
+      searchName: normalizeSearchTerm(name),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(doc(db, 'users', currentUser.uid, 'nutritionDB', docId), payload, { merge: true });
+
+    if (publish) {
+      await setDoc(doc(db, 'publicNutritionDB', `${currentUser.uid}_${docId}`), payload, { merge: true });
+    }
+  };
+
+  const savePersonalExerciseItem = async (name, info, publish = true) => {
+    if (!currentUser) return;
+
+    const docId = makeDbDocId(name);
+    const payload = {
+      ...info,
+      name,
+      ownerId: currentUser.uid,
+      searchName: normalizeSearchTerm(name),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(doc(db, 'users', currentUser.uid, 'exerciseDB', docId), payload, { merge: true });
+
+    if (publish) {
+      await setDoc(doc(db, 'publicExerciseDB', `${currentUser.uid}_${docId}`), payload, { merge: true });
+    }
+  };
+
+  const deletePersonalDbItem = async (type, name) => {
+    if (!currentUser || !name) return;
+
+    const docId = makeDbDocId(name);
+    const privatePath = type === 'exercise' ? 'exerciseDB' : 'nutritionDB';
+    const publicPath = type === 'exercise' ? 'publicExerciseDB' : 'publicNutritionDB';
+
+    await Promise.all([
+      deleteDoc(doc(db, 'users', currentUser.uid, privatePath, docId)),
+      deleteDoc(doc(db, publicPath, `${currentUser.uid}_${docId}`)),
+    ]);
+  };
+
+  const searchSharedDb = async () => {
+    if (!isFirestoreReady) {
+      showAlert('Firestore 연결을 준비 중입니다. 잠시 후 다시 검색해주세요.');
+      return;
+    }
+
+    setIsSharedLoading(true);
+    const isExerciseSearch = dbMode === 'exercise';
+    const collectionName = isExerciseSearch ? 'publicExerciseDB' : 'publicNutritionDB';
+    const searchTerm = normalizeSearchTerm(sharedSearchTerm);
+
+    try {
+      const sharedQuery = searchTerm
+        ? query(
+            collection(db, collectionName),
+            orderBy('searchName'),
+            where('searchName', '>=', searchTerm),
+            where('searchName', '<=', `${searchTerm}\uf8ff`),
+            limit(25)
+          )
+        : query(collection(db, collectionName), orderBy('updatedAt', 'desc'), limit(25));
+
+      const snapshot = await getDocs(sharedQuery);
+      setSharedResults(snapshot.docs.map((itemDoc) => ({
+        id: itemDoc.id,
+        ...itemDoc.data(),
+        dbKind: isExerciseSearch ? 'exercise' : 'nutrition',
+      })));
+    } catch (error) {
+      console.error('Search shared Firestore DB failed:', error);
+      showAlert('공유 DB 검색에 실패했습니다. Firestore 인덱스와 보안 규칙을 확인해주세요.');
+    } finally {
+      setIsSharedLoading(false);
+    }
+  };
+
+  const importSharedItem = async (item) => {
+    try {
+      if (item.dbKind === 'exercise') {
+        const exerciseInfo = { part: item.part, type: item.type, time: Number(item.time) || 0 };
+        setExerciseDB((prev) => ({ ...prev, [item.name]: exerciseInfo }));
+        await savePersonalExerciseItem(item.name, exerciseInfo, false);
+      } else {
+        const nutritionInfo = {
+          kcal: Number(item.kcal) || 0,
+          carb: Number(item.carb) || 0,
+          protein: Number(item.protein) || 0,
+          fat: Number(item.fat) || 0,
+          sugar: Number(item.sugar) || 0,
+        };
+        setNutritionDB((prev) => ({ ...prev, [item.name]: nutritionInfo }));
+        await savePersonalNutritionItem(item.name, nutritionInfo, item.source || 'shared', false);
+      }
+
+      showAlert('공유 DB 항목을 내 DB로 가져왔습니다.');
+    } catch (error) {
+      console.error('Import shared Firestore item failed:', error);
+      showAlert('공유 DB 항목을 가져오지 못했습니다.');
+    }
   };
 
   const generateCalendarDays = (year, month) => {
@@ -874,7 +1072,7 @@ export default function App() {
    };
  
   const renderDatabase = () => { 
-     const handleAddRecipe = (e) => {
+     const handleAddRecipe = async (e) => {
        e.preventDefault();
        if(recipeForm.ingredients.length === 0) return showAlert("재료를 추가해주세요.");
        const totalNutrition = recipeForm.ingredients.reduce((acc, item) => {
@@ -892,12 +1090,22 @@ export default function App() {
          protein: Number(totalNutrition.protein.toFixed(1)), fat: Number(totalNutrition.fat.toFixed(1)), sugar: Number(totalNutrition.sugar.toFixed(1))
        };
        setNutritionDB(newDB);
+       try {
+         if (dbEditingKey && dbEditingKey !== recipeForm.name) {
+           await deletePersonalDbItem('nutrition', dbEditingKey);
+         }
+         await savePersonalNutritionItem(recipeForm.name, newDB[recipeForm.name], 'recipe', true);
+       } catch (error) {
+         console.error('Save recipe to Firestore failed:', error);
+         showAlert('로컬에는 저장했지만 Firestore 저장에 실패했습니다.');
+         return;
+       }
        setRecipeForm({ name: '', ingredients: [] });
        setDbEditingKey(null);
        showAlert("레시피가 저장되었습니다!");
      };
  
-     const handleAddSingleItem = (e) => {
+     const handleAddSingleItem = async (e) => {
        e.preventDefault();
        const newDB = {...nutritionDB};
        if(dbEditingKey && dbEditingKey !== singleItemForm.name) delete newDB[dbEditingKey];
@@ -906,12 +1114,22 @@ export default function App() {
          protein: Number(singleItemForm.protein), fat: Number(singleItemForm.fat), sugar: Number(singleItemForm.sugar)
        };
        setNutritionDB(newDB);
+       try {
+         if (dbEditingKey && dbEditingKey !== singleItemForm.name) {
+           await deletePersonalDbItem('nutrition', dbEditingKey);
+         }
+         await savePersonalNutritionItem(singleItemForm.name, newDB[singleItemForm.name], 'single', true);
+       } catch (error) {
+         console.error('Save nutrition item to Firestore failed:', error);
+         showAlert('로컬에는 저장했지만 Firestore 저장에 실패했습니다.');
+         return;
+       }
        setSingleItemForm({ name: '', kcal: '', carb: '', protein: '', fat: '', sugar: '' });
        setDbEditingKey(null);
        showAlert(dbEditingKey ? "식재료가 수정되었습니다!" : "개별 재료가 저장되었습니다!");
      };
  
-     const handleAddExercise = (e) => {
+     const handleAddExercise = async (e) => {
        e.preventDefault();
        const newDB = {...exerciseDB};
        if(dbEditingKey && dbEditingKey !== newExerciseForm.name) delete newDB[dbEditingKey];
@@ -919,6 +1137,16 @@ export default function App() {
          part: newExerciseForm.part, type: newExerciseForm.type, time: Number(newExerciseForm.time) || 0
        };
        setExerciseDB(newDB);
+       try {
+         if (dbEditingKey && dbEditingKey !== newExerciseForm.name) {
+           await deletePersonalDbItem('exercise', dbEditingKey);
+         }
+         await savePersonalExerciseItem(newExerciseForm.name, newDB[newExerciseForm.name], true);
+       } catch (error) {
+         console.error('Save exercise item to Firestore failed:', error);
+         showAlert('로컬에는 저장했지만 Firestore 저장에 실패했습니다.');
+         return;
+       }
        setNewExerciseForm({ name: '', part: '전신', type: '유산소', time: '' });
        setDbEditingKey(null);
        showAlert(dbEditingKey ? "운동 DB가 수정되었습니다!" : "새로운 운동이 DB에 저장되었습니다!");
@@ -1071,6 +1299,61 @@ export default function App() {
                )}
              </div>
            )}
+         </div>
+         
+         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+           <h2 className="text-base font-bold text-gray-800 mb-3 border-b pb-2 flex items-center">
+             <Database size={16} className="mr-2 text-gray-500"/>공유 DB 검색
+           </h2>
+           <div className="flex gap-2 mb-3">
+             <input
+               type="text"
+               value={sharedSearchTerm}
+               onChange={(e) => setSharedSearchTerm(e.target.value)}
+               onKeyDown={(e) => { if (e.key === 'Enter') searchSharedDb(); }}
+               className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-gray-300"
+               placeholder={dbMode === 'exercise' ? '다른 사용자의 운동 검색' : '다른 사용자의 음식/레시피 검색'}
+             />
+             <button
+               type="button"
+               onClick={searchSharedDb}
+               disabled={isSharedLoading || !isFirestoreReady}
+               className="px-4 py-2 bg-gray-900 disabled:bg-gray-300 text-white rounded-lg text-xs font-bold"
+             >
+               {isSharedLoading ? '검색중' : '검색'}
+             </button>
+           </div>
+           <p className="text-[10px] text-gray-400 mb-3 font-medium">
+             직접 등록한 항목은 내 DB에 저장되고 공유 DB에도 등록됩니다. 검색한 항목은 가져오기로 내 DB에 복사할 수 있습니다.
+           </p>
+           <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+             {sharedResults.length === 0 ? (
+               <p className="text-xs text-gray-400 text-center py-4">
+                 {isFirestoreReady ? '검색어를 입력하거나 검색 버튼을 눌러 최신 공유 항목을 확인하세요.' : 'Firestore 연결 준비 중입니다.'}
+               </p>
+             ) : sharedResults.map((item) => (
+               <div key={item.id} className="flex items-center justify-between gap-3 border-b border-gray-100 pb-2">
+                 <div className="min-w-0 flex-1">
+                   <div className="flex items-center gap-1">
+                     <span className="font-bold text-sm text-gray-800 truncate">{item.name}</span>
+                     {item.ownerId === currentUser?.uid && <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">내 항목</span>}
+                   </div>
+                   {item.dbKind === 'exercise' ? (
+                     <p className="text-[10px] text-gray-500">{item.part}/{item.type} · {Number(item.time) > 0 ? `${item.time}분` : '자유시간'}</p>
+                   ) : (
+                     <p className="text-[10px] text-gray-500">{item.kcal}kcal · C:{item.carb} P:{item.protein} F:{item.fat} S:{item.sugar}</p>
+                   )}
+                 </div>
+                 <button
+                   type="button"
+                   onClick={() => importSharedItem(item)}
+                   className="shrink-0 bg-emerald-100 text-emerald-700 px-3 py-2 rounded-lg text-xs font-bold"
+                 >
+                   가져오기
+                 </button>
+               </div>
+             ))}
+           </div>
          </div>
          
          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
