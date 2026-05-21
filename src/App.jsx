@@ -588,6 +588,28 @@ export default function App() {
 
     return (
       <div className="space-y-6 pb-20 animate-fade-in">
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <h2 className="font-bold text-sm mb-3 text-gray-700">체중 분석 기준 설정</h2>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-[10px] text-gray-400 block mb-1">기준 몸무게 (kg)</label>
+              <input type="number" value={baseWeight} className="bg-gray-50 border-none p-2 rounded-xl w-full text-base font-bold" 
+                     onChange={(e) => { 
+                       const val = parseFloat(e.target.value); 
+                       setBaseWeight(val); 
+                       localStorage.setItem('baseWeight', JSON.stringify(val)); 
+                     }} />
+            </div>
+            <div className="flex-1">
+              <label className="text-[10px] text-gray-400 block mb-1">기준 날짜</label>
+              <input type="date" value={baseDate} className="bg-gray-50 border-none p-2 rounded-xl w-full text-xs font-bold text-gray-700" 
+                     onChange={(e) => { 
+                       setBaseDate(e.target.value); 
+                       localStorage.setItem('baseDate', JSON.stringify(e.target.value)); 
+                     }} />
+            </div>
+          </div>
+        </div>
         <div className="flex justify-between items-center px-2">
           <button onClick={() => handleMonthChange(-1)} className="p-1"><ChevronLeft/></button>
           <span className="font-bold text-lg">{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</span>
