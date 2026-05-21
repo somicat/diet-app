@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings, Edit3 } from 'lucide-react';
 
-// --- [초기 설정 및 목표] ---
-const START_WEIGHT = 52.0;
+// App 컴포넌트 내부 최상단에 추가
+const [baseWeight, setBaseWeight] = useState(() => getInitialState('baseWeight', 0));
+const [baseDate, setBaseDate] = useState(() => getInitialState('baseDate', ''));
 
 // 날짜 포맷 유틸
 const getLocalDateString = (dateObj) => {
@@ -27,6 +28,8 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState('diet');
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [baseWeight, setBaseWeight] = useState(() => getInitialState('baseWeight', 52.0));
+  const [baseDate, setBaseDate] = useState(() => getInitialState('baseDate', todayStr));
   
   // 날짜 선택 상태
   const [selectedDietDate, setSelectedDietDate] = useState(todayStr);
