@@ -1,5 +1,4 @@
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
 // 앞으로 사용할 데이터베이스(Firestore)와 인증(Auth) 모듈도 미리 가져옵니다.
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
@@ -17,7 +16,6 @@ const firebaseConfig = {
 
 // Firebase 초기화
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
 
 // App.jsx 등 다른 파일에서 사용할 수 있도록 DB와 Auth를 내보냅니다.
 export const db = getFirestore(app);
