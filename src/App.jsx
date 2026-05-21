@@ -2421,11 +2421,11 @@ const renderAccount = () => {
          <div className="bg-white w-full sm:w-96 rounded-2xl p-6 pb-8 shadow-2xl relative animate-slide-up">
            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={20}/></button>
            <h2 className="text-xl font-extrabold text-gray-800 mb-6 flex items-center">
-             {modalType === 'dday-start' ? <><Calendar className="mr-2 text-[#60a5fa]"/> 다이어트 시작일 설정</> : 
+             {modalType === 'dday-start' ? <><Calendar className="mr-2 text-[#60a5fa]"/> 다이어트 시작일 설정</> :
               modalType === 'dday-goal' ? <><Calendar className="mr-2 text-[#f87171]"/> 다이어트 목표일 설정</> :
               modalType === 'goals' ? <><Settings className="mr-2 text-gray-700"/> 목표 영양소 설정</> :
-              modalType === 'diet' ? <><Utensils className="mr-2 text-yellow-800"/> 식단 {editingLogId ? '수정' : '기록'}</> : 
-              modalType === 'weight' ? <><Scale className="mr-2 text-teal-500"/> 체중 {editingLogId ? '수정' : '기록'}</> : 
+              modalType === 'diet' ? <><Utensils className="mr-2 text-yellow-800"/> 식단 {editingLogId ? '수정' : '기록'}</> :
+              modalType === 'weight' ? <><Scale className="mr-2 text-teal-500"/> 체중 {editingLogId ? '수정' : '기록'}</> :
               <><Dumbbell className="mr-2 text-teal-500"/> 운동 {editingLogId ? '수정' : '기록'}</>}
            </h2>
  
