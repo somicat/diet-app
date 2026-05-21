@@ -25,8 +25,9 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState('diet');
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  
+  // 사용자가 직접 설정하는 기준 체중
   const [baseWeight, setBaseWeight] = useState(() => getInitialState('baseWeight', 52.0));
-  const [baseDate, setBaseDate] = useState(() => getInitialState('baseDate', todayStr));
   
   // 날짜 선택 상태
   const [selectedDietDate, setSelectedDietDate] = useState(todayStr);
@@ -50,7 +51,16 @@ export default function App() {
 
   // --- [데이터 상태 (로컬 스토리지 연동)] ---
   const [dailyGoals, setDailyGoals] = useState(() => getInitialState('dailyGoals', { kcal: 1400, carb: 140, protein: 80, fat: 40, sugar: 25 }));
-  const [dDayConfig, setDDayConfig] = useState(() => getInitialState('dDayConfig', { date: todayStr, type: 'start' }));
+  
+  // 디데이 통합 관리 (시작일, 목표일)
+  const [dDayConfig, setDDayConfig] = useState(() => {
+    const saved = getInitialState('dDayConfig', null);
+    if (saved) {
+      if (saved.date && saved.type) return { startDate: saved.date, goalDate: '' }; 
+      return saved;
+    }
+    return { startDate: todayStr, goalDate: '' };
+  });
 
   const [nutritionDB, setNutritionDB] = useState(() => getInitialState('nutritionDB', {
     "고구마 1개(115g)": { kcal: 159, carb: 37.7, protein: 1.7, fat: 0.2, sugar: 0 },
@@ -89,7 +99,7 @@ export default function App() {
 
   const [formData, setFormData] = useState({
     meal: '아침', menu: '', qty: 1, weight: '', time: '08:00', restroom: false, memo: '', exerciseName: '', exTime: '',
-    ddayType: 'start', ddayDate: todayStr,
+    ddayStartDate: todayStr, ddayGoalDate: '',
     goalKcal: '', goalCarb: '', goalProtein: '', goalFat: '', goalSugar: ''
   });
   const [recipeForm, setRecipeForm] = useState({ name: '', ingredients: [] });
@@ -121,19 +131,19 @@ export default function App() {
 
   const todayMacros = calculateMacros(getDayLogs(dietLogs, todayStr));
   const amWeights = weightLogs.filter(w => parseInt(w.time.split(':')[0], 10) >= 6 && parseInt(w.time.split(':')[0], 10) < 15);
-  const latestWeight = amWeights.length > 0 ? amWeights[amWeights.length - 1]?.weight : START_WEIGHT;
-  const prevWeight = amWeights.length > 1 ? amWeights[amWeights.length - 2]?.weight : START_WEIGHT;
+  const latestWeight = amWeights.length > 0 ? amWeights[amWeights.length - 1]?.weight : baseWeight;
+  const prevWeight = amWeights.length > 1 ? amWeights[amWeights.length - 2]?.weight : baseWeight;
   const weightDiff = (latestWeight - prevWeight).toFixed(2);
   
   const msPerDay = 1000 * 60 * 60 * 24;
-  const baseDate = new Date(todayStr); 
+  const todayBaseDate = new Date(todayStr); 
   const last8Weeks = [];
   for(let i=7; i>=0; i--) {
       let count = 0;
       weightLogs.forEach(w => {
           if(!w.restroom) return;
           const d = new Date(w.date);
-          const diffDays = Math.round((baseDate - d) / msPerDay);
+          const diffDays = Math.round((todayBaseDate - d) / msPerDay);
           if (diffDays >= i*7 && diffDays < (i+1)*7) count++;
       });
       last8Weeks.push({ weekLabel: i===0 ? "이번주" : `${i}주전`, count });
@@ -146,8 +156,12 @@ export default function App() {
     setEditingLogId(existingLog ? existingLog.id : null);
     setModalDate(existingLog ? existingLog.date : targetDate);
 
-    if (type === 'dday') {
-      setFormData(prev => ({ ...prev, ddayType: dDayConfig.type || 'start', ddayDate: dDayConfig.date || todayStr }));
+    if (type === 'dday-start' || type === 'dday-goal') {
+      setFormData(prev => ({ 
+        ...prev, 
+        ddayStartDate: dDayConfig.startDate || todayStr, 
+        ddayGoalDate: dDayConfig.goalDate || '' 
+      }));
     } else if (type === 'goals') {
       setFormData(prev => ({ 
         ...prev, goalKcal: dailyGoals.kcal, goalCarb: dailyGoals.carb, goalProtein: dailyGoals.protein, goalFat: dailyGoals.fat, goalSugar: dailyGoals.sugar 
@@ -180,8 +194,14 @@ export default function App() {
   const submitLog = (e) => {
     e.preventDefault();
     
-    if (modalType === 'dday') {
-      setDDayConfig({ type: formData.ddayType, date: formData.ddayDate });
+    if (modalType === 'dday-start') {
+      setDDayConfig({ ...dDayConfig, startDate: formData.ddayStartDate });
+      setIsModalOpen(false);
+      return;
+    }
+
+    if (modalType === 'dday-goal') {
+      setDDayConfig({ ...dDayConfig, goalDate: formData.ddayGoalDate });
       setIsModalOpen(false);
       return;
     }
@@ -274,25 +294,32 @@ export default function App() {
 
   const handleMonthChange = (offset) => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + offset, 1));
 
-  // --- D-day 계산 로직 ---
-  const getDdayInfo = () => {
-    if (!dDayConfig.date) return { text: "D-Day", subText: "다이어트 시작한지" };
+  // --- 시작일 및 목표일 계산 로직 ---
+  const getDdayInfos = () => {
+    const today = new Date(todayStr).getTime();
     
-    const today = new Date(todayStr);
-    const target = new Date(dDayConfig.date);
-    const diffTime = target.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-
-    if (dDayConfig.type === 'start') {
+    // 시작일 계산
+    let startInfo = { text: "D-Day", subText: "다이어트 시작한지" };
+    if (dDayConfig.startDate) {
+      const startTarget = new Date(dDayConfig.startDate).getTime();
+      const diffDays = Math.ceil((startTarget - today) / (1000 * 60 * 60 * 24));
       const passed = -diffDays;
-      if (passed < 0) return { text: `D${passed}`, subText: "다이어트 시작 전" }; 
-      if (passed === 0) return { text: "D-Day", subText: "다이어트 시작한지" };
-      return { text: `D+${passed}`, subText: "다이어트 시작한지" };
-    } else { 
-      if (diffDays < 0) return { text: `D+${-diffDays}`, subText: "목표일 지남" };
-      if (diffDays === 0) return { text: "D-Day", subText: "다이어트 목표까지" };
-      return { text: `D-${diffDays}`, subText: "다이어트 목표까지" };
+      if (passed < 0) startInfo = { text: `D${passed}`, subText: "다이어트 시작 전" };
+      else if (passed === 0) startInfo = { text: "D-Day", subText: "다이어트 시작한지" };
+      else startInfo = { text: `D+${passed}`, subText: "다이어트 시작한지" };
     }
+
+    // 목표일 계산
+    let goalInfo = { text: "미설정", subText: "클릭하여 목표일 추가" };
+    if (dDayConfig.goalDate) {
+      const goalTarget = new Date(dDayConfig.goalDate).getTime();
+      const diffDays = Math.ceil((goalTarget - today) / (1000 * 60 * 60 * 24));
+      if (diffDays < 0) goalInfo = { text: `D+${-diffDays}`, subText: "목표일 지남" };
+      else if (diffDays === 0) goalInfo = { text: "D-Day", subText: "다이어트 목표까지" };
+      else goalInfo = { text: `D-${diffDays}`, subText: "다이어트 목표까지" };
+    }
+
+    return { startInfo, goalInfo };
   };
 
   // ============================
@@ -300,26 +327,33 @@ export default function App() {
   // ============================
   const renderHeader = () => {
     let title = '';
+    let Icon = null;
     let buttonConfig = null;
 
-    if (activeTab === 'home') title = '오늘의 요약';
-    else if (activeTab === 'database') title = '종합 DB';
-    else if (activeTab === 'diet') {
-      title = '식단 분석';
+    if (activeTab === 'home') {
+      title = '오늘의 요약';
+      Icon = Home;
+    } else if (activeTab === 'database') {
+      title = '종합 DB';
+      Icon = Database;
+    } else if (activeTab === 'diet') {
+      title = '식단 관리';
+      Icon = Utensils;
       buttonConfig = { label: '식단 기록', type: 'diet', date: selectedDietDate };
-    }
-    else if (activeTab === 'weight') {
+    } else if (activeTab === 'weight') {
       title = '체중 관리';
+      Icon = Scale;
       buttonConfig = { label: '체중 기록', type: 'weight', date: selectedWeightDate };
-    }
-    else if (activeTab === 'exercise') {
-      title = '운동 일지';
+    } else if (activeTab === 'exercise') {
+      title = '운동 관리';
+      Icon = Dumbbell;
       buttonConfig = { label: '운동 기록', type: 'exercise', date: selectedExerciseDate };
     }
 
     return (
       <header className="bg-white/90 backdrop-blur-md pt-10 pb-4 px-6 sticky top-0 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex justify-between items-center">
-        <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight">
+        <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight flex items-center gap-2.5">
+          {Icon && <Icon className="text-gray-700" size={26} strokeWidth={2.5} />}
           {title}
         </h1>
         {buttonConfig && (
@@ -343,25 +377,36 @@ export default function App() {
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
     const todayIdx = new Date().getDay();
     const todaysPlan = weeklyExercisePlan[todayIdx] || [];
-    const dDayInfo = getDdayInfo();
+    const { startInfo, goalInfo } = getDdayInfos();
 
     return (
       <div className="space-y-4 pb-20 animate-fade-in flex flex-col items-center">
+        {/* 시작일 & 목표일 위젯 (가로 배치) */}
         <div className="grid grid-cols-2 gap-4 w-full mb-1">
-          <div onClick={() => openModal('dday')} className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative cursor-pointer hover:bg-gray-50 transition-colors group">
-            <span className="text-3xl font-black tracking-tight mb-2 text-blue-600">{dDayInfo.text}</span>
-            <span className="text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-3 py-1 rounded-full group-hover:bg-blue-100 transition-colors">{dDayInfo.subText}</span>
+          <div onClick={() => openModal('dday-start')} className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative cursor-pointer hover:bg-gray-50 transition-colors group">
+            <div className="absolute top-3 left-3 text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded">시작일</div>
+            <span className="text-3xl font-black tracking-tight mb-2 text-blue-600 mt-3">{startInfo.text}</span>
+            <span className="text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-3 py-1 rounded-full group-hover:bg-blue-100 transition-colors">{startInfo.subText}</span>
             <Calendar size={14} className="absolute top-3 right-3 text-gray-300 group-hover:text-blue-500 transition-colors" />
           </div>
-          <div className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative">
-            <span className="text-[11px] font-bold text-gray-400 mb-1">오늘의 체중</span>
-            <div className="text-3xl font-extrabold text-gray-800 flex items-end tracking-tighter mb-2">
-              {latestWeight} <span className="text-sm font-medium text-gray-400 ml-1 mb-1 tracking-normal">kg</span>
-            </div>
-            <div className="text-[10px] font-bold flex items-center justify-center bg-gray-50 px-2.5 py-1 rounded-full text-gray-500 border border-gray-100">
-              전날대비: {Number(weightDiff) > 0 ? <span className="text-red-500 flex items-center ml-1"><ArrowUp size={10}/> {weightDiff}</span> 
-                        : Number(weightDiff) < 0 ? <span className="text-blue-500 flex items-center ml-1"><ArrowDown size={10}/> {Math.abs(weightDiff)}</span> : <span className="ml-1">-</span>}
-            </div>
+          
+          <div onClick={() => openModal('dday-goal')} className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative cursor-pointer hover:bg-gray-50 transition-colors group">
+            <div className="absolute top-3 left-3 text-[10px] font-bold text-purple-500 bg-purple-50 px-2 py-0.5 rounded">목표일</div>
+            <span className="text-3xl font-black tracking-tight mb-2 text-purple-600 mt-3">{goalInfo.text}</span>
+            <span className="text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-3 py-1 rounded-full group-hover:bg-purple-100 transition-colors">{goalInfo.subText}</span>
+            <Calendar size={14} className="absolute top-3 right-3 text-gray-300 group-hover:text-purple-500 transition-colors" />
+          </div>
+        </div>
+
+        {/* 오늘의 체중 (그 아래 가로로 꽉 차게 변경) */}
+        <div className="h-28 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative w-full mb-2">
+          <span className="text-[11px] font-bold text-gray-400 mb-1">오늘의 체중</span>
+          <div className="text-3xl font-extrabold text-gray-800 flex items-end tracking-tighter mb-2">
+            {latestWeight} <span className="text-sm font-medium text-gray-400 ml-1 mb-1 tracking-normal">kg</span>
+          </div>
+          <div className="text-[10px] font-bold flex items-center justify-center bg-gray-50 px-3 py-1 rounded-full text-gray-500 border border-gray-100">
+            전날대비: {Number(weightDiff) > 0 ? <span className="text-red-500 flex items-center ml-1"><ArrowUp size={10}/> {weightDiff}</span> 
+                      : Number(weightDiff) < 0 ? <span className="text-blue-500 flex items-center ml-1"><ArrowDown size={10}/> {Math.abs(weightDiff)}</span> : <span className="ml-1">-</span>}
           </div>
         </div>
 
@@ -559,10 +604,13 @@ export default function App() {
     const currentW = getAmWeight(tLogs) || getPmWeight(tLogs); 
     const diffPrevPm = (currentW && getPmWeight(pLogs)) ? (currentW - getPmWeight(pLogs)).toFixed(2) : null;
     const diffPrevAm = (currentW && getAmWeight(pLogs)) ? (currentW - getAmWeight(pLogs)).toFixed(2) : null;
-    const diffStart = currentW ? (currentW - START_WEIGHT).toFixed(2) : null;
+    
+    // 사용자가 입력한 기준 몸무게(baseWeight)를 사용하여 계산
+    const diffStart = currentW ? (currentW - baseWeight).toFixed(2) : null;
 
     const last30DaysWeights = amWeights.filter(w => new Date(w.date) >= new Date(Date.now() - 30 * 86400000)).sort((a,b) => a.date.localeCompare(b.date));
-    let minW = START_WEIGHT, maxW = START_WEIGHT, points = "", minPoint = null, maxPoint = null, minIdx = 0, maxIdx = 0;
+    let minW = baseWeight, maxW = baseWeight, points = "", minPoint = null, maxPoint = null, minIdx = 0, maxIdx = 0;
+    
     if(last30DaysWeights.length > 0) {
       minPoint = last30DaysWeights.reduce((min, p) => p.weight < min.weight ? p : min, last30DaysWeights[0]);
       maxPoint = last30DaysWeights.reduce((max, p) => p.weight > max.weight ? p : max, last30DaysWeights[0]);
@@ -588,28 +636,21 @@ export default function App() {
 
     return (
       <div className="space-y-6 pb-20 animate-fade-in">
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-          <h2 className="font-bold text-sm mb-3 text-gray-700">체중 분석 기준 설정</h2>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="text-[10px] text-gray-400 block mb-1">기준 몸무게 (kg)</label>
-              <input type="number" value={baseWeight} className="bg-gray-50 border-none p-2 rounded-xl w-full text-base font-bold" 
-                     onChange={(e) => { 
-                       const val = parseFloat(e.target.value); 
-                       setBaseWeight(val); 
-                       localStorage.setItem('baseWeight', JSON.stringify(val)); 
-                     }} />
-            </div>
-            <div className="flex-1">
-              <label className="text-[10px] text-gray-400 block mb-1">기준 날짜</label>
-              <input type="date" value={baseDate} className="bg-gray-50 border-none p-2 rounded-xl w-full text-xs font-bold text-gray-700" 
-                     onChange={(e) => { 
-                       setBaseDate(e.target.value); 
-                       localStorage.setItem('baseDate', JSON.stringify(e.target.value)); 
-                     }} />
-            </div>
+        {/* 기준 날짜 입력란 제거됨 */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
+          <h2 className="font-bold text-sm text-gray-700">시작 기준 몸무게</h2>
+          <div className="flex items-center w-32">
+            <input type="number" value={baseWeight} className="bg-gray-50 border-none p-2 rounded-xl w-full text-base font-bold text-right" 
+                    onChange={(e) => { 
+                      const val = parseFloat(e.target.value); 
+                      const validVal = isNaN(val) ? 0 : val;
+                      setBaseWeight(validVal); 
+                      localStorage.setItem('baseWeight', JSON.stringify(validVal)); 
+                    }} />
+            <span className="text-sm text-gray-500 ml-2 font-medium">kg</span>
           </div>
         </div>
+
         <div className="flex justify-between items-center px-2">
           <button onClick={() => handleMonthChange(-1)} className="p-1"><ChevronLeft/></button>
           <span className="font-bold text-lg">{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</span>
@@ -655,7 +696,8 @@ export default function App() {
                 <tr className="text-xs text-gray-500 border-b">
                   <th className="pb-2 font-medium w-1/3 border-r">전날 오후 대비</th>
                   <th className="pb-2 font-medium w-1/3 border-r">전날 대비</th>
-                  <th className="pb-2 font-medium w-1/3">첫 날 대비</th>
+                  {/* 동적으로 변경되는 시작일 표시 (메인탭 설정 값) */}
+                  <th className="pb-2 font-medium w-1/3">시작일({dDayConfig.startDate ? dDayConfig.startDate.slice(5) : '미정'}) 대비</th>
                 </tr>
               </thead>
               <tbody>
@@ -1064,7 +1106,8 @@ export default function App() {
          <div className="bg-white w-full sm:w-96 rounded-2xl p-6 pb-8 shadow-2xl relative animate-slide-up">
            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200"><X size={20}/></button>
            <h2 className="text-xl font-extrabold text-gray-800 mb-6 flex items-center">
-             {modalType === 'dday' ? <><Calendar className="mr-2 text-blue-500"/> 디데이 설정</> : 
+             {modalType === 'dday-start' ? <><Calendar className="mr-2 text-blue-500"/> 다이어트 시작일 설정</> : 
+              modalType === 'dday-goal' ? <><Calendar className="mr-2 text-purple-500"/> 다이어트 목표일 설정</> :
               modalType === 'goals' ? <><Settings className="mr-2 text-gray-700"/> 목표 영양소 설정</> :
               modalType === 'diet' ? <><Utensils className="mr-2 text-orange-500"/> 식단 {editingLogId ? '수정' : '기록'}</> : 
               modalType === 'weight' ? <><Scale className="mr-2 text-blue-500"/> 체중 {editingLogId ? '수정' : '기록'}</> : 
@@ -1072,23 +1115,22 @@ export default function App() {
            </h2>
  
            <form onSubmit={submitLog} className="space-y-5">
-             {modalType === 'dday' && (
-               <>
-                 <div className="flex gap-2 mb-4">
-                   <button type="button" onClick={() => setFormData({...formData, ddayType: 'start'})} 
-                           className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${formData.ddayType === 'start' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-500 border border-gray-200'}`}>
-                     다이어트 시작일
-                   </button>
-                   <button type="button" onClick={() => setFormData({...formData, ddayType: 'goal'})} 
-                           className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${formData.ddayType === 'goal' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-500 border border-gray-200'}`}>
-                     다이어트 목표일
-                   </button>
-                 </div>
+             {modalType === 'dday-start' && (
+               <div className="space-y-4">
                  <div>
-                   <label className="block text-sm font-bold text-gray-700 mb-1">날짜 선택</label>
-                   <input type="date" name="ddayDate" value={formData.ddayDate} onChange={handleInputChange} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-300" required />
+                   <label className="block text-sm font-bold text-gray-700 mb-1">다이어트 시작일</label>
+                   <input type="date" name="ddayStartDate" value={formData.ddayStartDate} onChange={handleInputChange} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-300" required />
                  </div>
-               </>
+               </div>
+             )}
+
+             {modalType === 'dday-goal' && (
+               <div className="space-y-4">
+                 <div>
+                   <label className="block text-sm font-bold text-gray-700 mb-1">다이어트 목표일</label>
+                   <input type="date" name="ddayGoalDate" value={formData.ddayGoalDate} onChange={handleInputChange} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-300" required />
+                 </div>
+               </div>
              )}
 
              {modalType === 'goals' && (
@@ -1186,13 +1228,13 @@ export default function App() {
              )}
  
              <div className="flex gap-3 mt-4">
-                {editingLogId && modalType !== 'dday' && modalType !== 'goals' && (
+                {editingLogId && !modalType.startsWith('dday') && modalType !== 'goals' && (
                   <button type="button" onClick={deleteLog} className="w-1/4 bg-red-100 hover:bg-red-200 text-red-600 font-bold py-4 rounded-xl transition duration-200 flex justify-center items-center">
                     <Trash2 size={20} />
                   </button>
                 )}
                 <button type="submit" className="flex-1 bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl transition duration-200 text-lg shadow-lg">
-                  {modalType === 'dday' || modalType === 'goals' ? '설정 저장' : (editingLogId ? '수정 완료' : '기록 저장')}
+                  {modalType.startsWith('dday') || modalType === 'goals' ? '설정 저장' : (editingLogId ? '수정 완료' : '기록 저장')}
                 </button>
              </div>
            </form>
