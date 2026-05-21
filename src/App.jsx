@@ -36,18 +36,64 @@ const EMPTY_APP_DEFAULTS = {
   weeklyExercisePlan: EMPTY_WEEKLY_PLAN,
 };
 
+const USER_SCOPED_STORAGE_KEYS = [
+  'baseWeight',
+  'dailyGoals',
+  'dDayConfig',
+  'nutritionDB',
+  'exerciseDB',
+  'dietLogs',
+  'weightLogs',
+  'exerciseLogs',
+  'weeklyExercisePlan',
+];
+
 const WEIGHT_CHART_LINE = "#848b96";
 const CHART_MINT = "#5eead4";
 const RESTROOM_RED = "#f87171";
 const DDAY_BLUE = "#60a5fa";
 
-// 로컬 스토리지 초기화 유틸
-const getInitialState = (key, defaultValue) => {
+const getDefaultDDayConfig = () => ({ startDate: todayStr, goalDate: '' });
+
+const getDefaultAppData = () => ({
+  baseWeight: EMPTY_APP_DEFAULTS.baseWeight,
+  dailyGoals: EMPTY_APP_DEFAULTS.dailyGoals,
+  dDayConfig: getDefaultDDayConfig(),
+  nutritionDB: EMPTY_APP_DEFAULTS.nutritionDB,
+  exerciseDB: EMPTY_APP_DEFAULTS.exerciseDB,
+  dietLogs: EMPTY_APP_DEFAULTS.dietLogs,
+  weightLogs: EMPTY_APP_DEFAULTS.weightLogs,
+  exerciseLogs: EMPTY_APP_DEFAULTS.exerciseLogs,
+  weeklyExercisePlan: EMPTY_APP_DEFAULTS.weeklyExercisePlan,
+});
+
+const makeUserStorageKey = (uid, key) => `healthLog:${uid}:${key}`;
+
+const normalizeDDayConfig = (saved) => {
+  if (!saved) return getDefaultDDayConfig();
+  if (saved.date && saved.type) return { startDate: saved.date, goalDate: '' };
+  return { ...getDefaultDDayConfig(), ...saved };
+};
+
+const getUserStoredState = (uid, key, defaultValue) => {
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem(key);
+    const saved = localStorage.getItem(makeUserStorageKey(uid, key));
     if (saved !== null) return JSON.parse(saved);
   }
   return defaultValue;
+};
+
+const getUserStoredAppData = (uid) => {
+  const defaults = getDefaultAppData();
+  if (!uid) return defaults;
+
+  return USER_SCOPED_STORAGE_KEYS.reduce((acc, key) => {
+    const value = getUserStoredState(uid, key, acc[key]);
+    return {
+      ...acc,
+      [key]: key === 'dDayConfig' ? normalizeDDayConfig(value) : value,
+    };
+  }, defaults);
 };
 
 const formatRemainder = (max, cur) => {
@@ -67,7 +113,7 @@ export default function App() {
   const [monthPicker, setMonthPicker] = useState({ isOpen: false, tab: null, year: new Date().getFullYear(), month: new Date().getMonth() });
 
   // 사용자가 직접 설정하는 기준 체중
-  const [baseWeight, setBaseWeight] = useState(() => getInitialState('baseWeight', EMPTY_APP_DEFAULTS.baseWeight));
+  const [baseWeight, setBaseWeight] = useState(EMPTY_APP_DEFAULTS.baseWeight);
   
   // 날짜 선택 상태
   const [selectedDietDate, setSelectedDietDate] = useState(todayStr);
@@ -82,6 +128,7 @@ export default function App() {
   // DB 수정 관련 상태
   const [dbEditingKey, setDbEditingKey] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+  const [storageUserId, setStorageUserId] = useState(null);
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
   const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
@@ -140,37 +187,51 @@ setPassword("");
   }
 };
   // --- [데이터 상태 (로컬 스토리지 연동)] ---
-  const [dailyGoals, setDailyGoals] = useState(() => getInitialState('dailyGoals', EMPTY_APP_DEFAULTS.dailyGoals));
+  const [dailyGoals, setDailyGoals] = useState(EMPTY_APP_DEFAULTS.dailyGoals);
   
   // 디데이 통합 관리 (시작일, 목표일)
-  const [dDayConfig, setDDayConfig] = useState(() => {
-    const saved = getInitialState('dDayConfig', null);
-    if (saved) {
-      if (saved.date && saved.type) return { startDate: saved.date, goalDate: '' }; 
-      return saved;
-    }
-    return { startDate: todayStr, goalDate: '' };
-  });
+  const [dDayConfig, setDDayConfig] = useState(getDefaultDDayConfig);
 
-  const [nutritionDB, setNutritionDB] = useState(() => getInitialState('nutritionDB', EMPTY_APP_DEFAULTS.nutritionDB));
-  const [exerciseDB, setExerciseDB] = useState(() => getInitialState('exerciseDB', EMPTY_APP_DEFAULTS.exerciseDB));
-  const [dietLogs, setDietLogs] = useState(() => getInitialState('dietLogs', EMPTY_APP_DEFAULTS.dietLogs));
-  const [weightLogs, setWeightLogs] = useState(() => getInitialState('weightLogs', EMPTY_APP_DEFAULTS.weightLogs));
-  const [exerciseLogs, setExerciseLogs] = useState(() => getInitialState('exerciseLogs', EMPTY_APP_DEFAULTS.exerciseLogs));
-  const [weeklyExercisePlan, setWeeklyExercisePlan] = useState(() =>
-    getInitialState('weeklyExercisePlan', EMPTY_APP_DEFAULTS.weeklyExercisePlan)
-  );
+  const [nutritionDB, setNutritionDB] = useState(EMPTY_APP_DEFAULTS.nutritionDB);
+  const [exerciseDB, setExerciseDB] = useState(EMPTY_APP_DEFAULTS.exerciseDB);
+  const [dietLogs, setDietLogs] = useState(EMPTY_APP_DEFAULTS.dietLogs);
+  const [weightLogs, setWeightLogs] = useState(EMPTY_APP_DEFAULTS.weightLogs);
+  const [exerciseLogs, setExerciseLogs] = useState(EMPTY_APP_DEFAULTS.exerciseLogs);
+  const [weeklyExercisePlan, setWeeklyExercisePlan] = useState(EMPTY_APP_DEFAULTS.weeklyExercisePlan);
+
+  const applyAppData = (data) => {
+    setBaseWeight(data.baseWeight);
+    setDailyGoals(data.dailyGoals);
+    setDDayConfig(normalizeDDayConfig(data.dDayConfig));
+    setNutritionDB(data.nutritionDB);
+    setExerciseDB(data.exerciseDB);
+    setDietLogs(data.dietLogs);
+    setWeightLogs(data.weightLogs);
+    setExerciseLogs(data.exerciseLogs);
+    setWeeklyExercisePlan(data.weeklyExercisePlan);
+    setSelectedDietDate(todayStr);
+    setSelectedWeightDate(todayStr);
+    setSelectedExerciseDate(todayStr);
+    setCurrentMonth(new Date());
+    setEditingLogId(null);
+    setDbEditingKey(null);
+  };
+
+  const saveUserScopedState = (key, value) => {
+    if (!currentUser?.uid || storageUserId !== currentUser.uid) return;
+    localStorage.setItem(makeUserStorageKey(currentUser.uid, key), JSON.stringify(value));
+  };
 
   // 데이터 변경 시 로컬 스토리지 자동 저장
-  useEffect(() => localStorage.setItem('dailyGoals', JSON.stringify(dailyGoals)), [dailyGoals]);
-  useEffect(() => localStorage.setItem('dDayConfig', JSON.stringify(dDayConfig)), [dDayConfig]);
-  useEffect(() => localStorage.setItem('nutritionDB', JSON.stringify(nutritionDB)), [nutritionDB]);
-  useEffect(() => localStorage.setItem('exerciseDB', JSON.stringify(exerciseDB)), [exerciseDB]);
-  useEffect(() => localStorage.setItem('dietLogs', JSON.stringify(dietLogs)), [dietLogs]);
-  useEffect(() => localStorage.setItem('weightLogs', JSON.stringify(weightLogs)), [weightLogs]);
-  useEffect(() => localStorage.setItem('exerciseLogs', JSON.stringify(exerciseLogs)), [exerciseLogs]);
-  useEffect(() => localStorage.setItem('weeklyExercisePlan', JSON.stringify(weeklyExercisePlan)), [weeklyExercisePlan]);
-  useEffect(() => localStorage.setItem('baseWeight', JSON.stringify(baseWeight)), [baseWeight]);
+  useEffect(() => saveUserScopedState('dailyGoals', dailyGoals), [currentUser, storageUserId, dailyGoals]);
+  useEffect(() => saveUserScopedState('dDayConfig', dDayConfig), [currentUser, storageUserId, dDayConfig]);
+  useEffect(() => saveUserScopedState('nutritionDB', nutritionDB), [currentUser, storageUserId, nutritionDB]);
+  useEffect(() => saveUserScopedState('exerciseDB', exerciseDB), [currentUser, storageUserId, exerciseDB]);
+  useEffect(() => saveUserScopedState('dietLogs', dietLogs), [currentUser, storageUserId, dietLogs]);
+  useEffect(() => saveUserScopedState('weightLogs', weightLogs), [currentUser, storageUserId, weightLogs]);
+  useEffect(() => saveUserScopedState('exerciseLogs', exerciseLogs), [currentUser, storageUserId, exerciseLogs]);
+  useEffect(() => saveUserScopedState('weeklyExercisePlan', weeklyExercisePlan), [currentUser, storageUserId, weeklyExercisePlan]);
+  useEffect(() => saveUserScopedState('baseWeight', baseWeight), [currentUser, storageUserId, baseWeight]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem(APP_INITIALIZED_KEY)) {
@@ -185,11 +246,17 @@ setPassword("");
 
 useEffect(() => {
   const unsubscribe = onAuthStateChanged(auth, (user) => {
+    cloudSyncGeneration.current += 1;
+    setStorageUserId(null);
+
     if (user) {
+      applyAppData(getUserStoredAppData(user.uid));
       setCurrentUser(user);
+      setStorageUserId(user.uid);
       setIsFirestoreReady(true);
       setShowAuthModal(false);
     } else {
+      applyAppData(getDefaultAppData());
       setCurrentUser(null);
       setIsFirestoreReady(false);
       setShowAuthModal(true);
@@ -244,33 +311,23 @@ useEffect(() => {
           };
         });
 
-        if (Object.keys(cloudNutrition).length > 0) {
-          setNutritionDB((prev) => ({ ...prev, ...cloudNutrition }));
-        }
-        if (Object.keys(cloudExercise).length > 0) {
-          setExerciseDB((prev) => ({ ...prev, ...cloudExercise }));
-        }
+        setNutritionDB(cloudNutrition);
+        setExerciseDB(cloudExercise);
 
         const cloudDietLogs = mapCloudLogs(dietSnap);
         const cloudWeightLogs = mapCloudLogs(weightSnap);
         const cloudExerciseLogs = mapCloudLogs(exerciseLogSnap);
 
-        if (cloudDietLogs.length > 0) {
-          const sortedDietLogs = cloudDietLogs.sort((a, b) => a.date.localeCompare(b.date));
-          setDietLogs(sortedDietLogs);
+        const sortedDietLogs = cloudDietLogs.sort((a, b) => a.date.localeCompare(b.date));
+        setDietLogs(sortedDietLogs);
+        if (sortedDietLogs.length > 0) {
           const latestDate = sortedDietLogs[sortedDietLogs.length - 1].date;
-          if (latestDate) {
-            setSelectedDietDate(latestDate);
-            const [y, m] = latestDate.split('-').map(Number);
-            if (y && m) setCurrentMonth(new Date(y, m - 1, 1));
-          }
+          setSelectedDietDate(latestDate);
+          const [y, m] = latestDate.split('-').map(Number);
+          if (y && m) setCurrentMonth(new Date(y, m - 1, 1));
         }
-        if (cloudWeightLogs.length > 0) {
-          setWeightLogs(cloudWeightLogs.sort((a, b) => a.date.localeCompare(b.date) || String(a.time).localeCompare(String(b.time))));
-        }
-        if (cloudExerciseLogs.length > 0) {
-          setExerciseLogs(cloudExerciseLogs.sort((a, b) => a.date.localeCompare(b.date)));
-        }
+        setWeightLogs(cloudWeightLogs.sort((a, b) => a.date.localeCompare(b.date) || String(a.time).localeCompare(String(b.time))));
+        setExerciseLogs(cloudExerciseLogs.sort((a, b) => a.date.localeCompare(b.date)));
       } catch (error) {
         console.error('Load personal Firestore DB failed:', error);
         showAlert('Firestore 개인 DB를 불러오지 못했습니다. 네트워크와 보안 규칙을 확인해주세요.');
@@ -1575,7 +1632,6 @@ const calculateMacros = (logs) => {
                       const val = parseFloat(e.target.value); 
                       const validVal = isNaN(val) ? 0 : val;
                       setBaseWeight(validVal); 
-                      localStorage.setItem('baseWeight', JSON.stringify(validVal)); 
                     }} />
             <span className="text-sm text-gray-500 ml-2 font-medium">kg</span>
           </div>
