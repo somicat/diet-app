@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings, Edit3 } from 'lucide-react';
 import { collection, deleteDoc, doc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import {
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut
+} from "firebase/auth";
 import { auth, db } from './firebase';
 
 
@@ -49,6 +54,9 @@ export default function App() {
   const [dbEditingKey, setDbEditingKey] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
+  const [email, setEmail] = useState("");
+const [password, setPassword] = useState("");
+const [showAuthModal, setShowAuthModal] = useState(false);
   const [sharedSearchTerm, setSharedSearchTerm] = useState('');
   const [sharedResults, setSharedResults] = useState([]);
   const [isSharedLoading, setIsSharedLoading] = useState(false);
@@ -61,6 +69,40 @@ export default function App() {
   const showConfirm = (message, onConfirm) => setDialog({ isOpen: true, type: 'confirm', message, onConfirm });
   const closeDialog = () => setDialog({ isOpen: false, type: 'alert', message: '', onConfirm: null });
 
+const handleSignup = async () => {
+  try {
+    await createUserWithEmailAndPassword(auth, email, password);
+
+    setShowAuthModal(false);
+
+    showAlert("회원가입 성공");
+  } catch (error) {
+    console.error(error);
+    showAlert(error.message);
+  }
+};
+
+const handleLogin = async () => {
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+
+    setShowAuthModal(false);
+
+    showAlert("로그인 성공");
+  } catch (error) {
+    console.error(error);
+    showAlert(error.message);
+  }
+};
+
+const handleLogout = async () => {
+  try {
+    await signOut(auth);
+    showAlert("로그아웃 되었습니다.");
+  } catch (error) {
+    console.error(error);
+  }
+};
   // --- [데이터 상태 (로컬 스토리지 연동)] ---
   const [dailyGoals, setDailyGoals] = useState(() => getInitialState('dailyGoals', { kcal: 1400, carb: 140, protein: 80, fat: 40, sugar: 25 }));
   
@@ -109,23 +151,21 @@ export default function App() {
   useEffect(() => localStorage.setItem('exerciseLogs', JSON.stringify(exerciseLogs)), [exerciseLogs]);
   useEffect(() => localStorage.setItem('weeklyExercisePlan', JSON.stringify(weeklyExercisePlan)), [weeklyExercisePlan]);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUser(user);
-        setIsFirestoreReady(true);
-        return;
-      }
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, (user) => {
+    if (user) {
+      setCurrentUser(user);
+      setIsFirestoreReady(true);
+      setShowAuthModal(false);
+    } else {
+      setCurrentUser(null);
+      setIsFirestoreReady(false);
+      setShowAuthModal(true);
+    }
+  });
 
-      signInAnonymously(auth).catch((error) => {
-        console.error('Firebase anonymous auth failed:', error);
-        setIsFirestoreReady(false);
-        showAlert('Firestore 로그인에 실패했습니다. Firebase Auth의 익명 로그인을 켜주세요.');
-      });
-    });
-
-    return unsubscribe;
-  }, []);
+  return unsubscribe;
+}, []);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -624,7 +664,10 @@ export default function App() {
       title = '운동 관리';
       Icon = Dumbbell;
       buttonConfig = { label: '운동 기록', type: 'exercise', date: selectedExerciseDate };
-    }
+    } else if (activeTab === 'account') {
+  title = '계정';
+  Icon = Settings;
+}
 
     return (
       <header className="bg-white/90 backdrop-blur-md pt-10 pb-4 px-6 sticky top-0 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex justify-between items-center">
@@ -657,6 +700,7 @@ export default function App() {
 
     return (
       <div className="space-y-4 pb-20 animate-fade-in flex flex-col items-center">
+
         {/* 시작일 & 목표일 위젯 (가로 배치) */}
         <div className="grid grid-cols-2 gap-4 w-full mb-1">
           <div onClick={() => openModal('dday-start')} className="h-32 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-col justify-center items-center relative cursor-pointer hover:bg-gray-50 transition-colors group">
@@ -1059,7 +1103,7 @@ export default function App() {
          totalExTime += log.time;
        });
      });
-
+     
      const selectedExLogs = getDayLogs(exerciseLogs, selectedExerciseDate);
  
      return (
@@ -1146,7 +1190,38 @@ export default function App() {
        </div>
      );
    };
- 
+   
+
+const renderAccount = () => {
+  return (
+    <div className="space-y-4 pb-20 animate-fade-in">
+      <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        
+        <h2 className="text-lg font-bold mb-4">
+          계정 정보
+        </h2>
+
+        <div className="bg-gray-50 rounded-xl p-4 mb-4">
+          <p className="text-sm text-gray-500 mb-1">
+            로그인된 이메일
+          </p>
+
+          <p className="font-bold text-gray-800 break-all">
+            {currentUser?.email}
+          </p>
+        </div>
+
+        <button
+          onClick={handleLogout}
+          className="w-full bg-red-500 text-white p-3 rounded-xl font-bold"
+        >
+          로그아웃
+        </button>
+      </div>
+    </div>
+  );
+};
+
   const renderDatabase = () => { 
      const handleAddRecipe = async (e) => {
        e.preventDefault();
@@ -1633,6 +1708,7 @@ export default function App() {
           {activeTab === 'weight' && renderWeight()}
           {activeTab === 'exercise' && renderExercise()}
           {activeTab === 'database' && renderDatabase()}
+          {activeTab === 'account' && renderAccount()}
         </main>
 
         <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-200 flex justify-around items-center pb-safe z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
@@ -1641,7 +1717,8 @@ export default function App() {
             { id: 'diet', icon: Utensils, label: '식단' },
             { id: 'weight', icon: Scale, label: '체중' },
             { id: 'exercise', icon: Dumbbell, label: '운동' },
-            { id: 'database', icon: Database, label: 'DB' }
+            { id: 'database', icon: Database, label: 'DB' },
+            { id: 'account', icon: Settings, label: '계정' }
           ].map(tab => (
             <button 
               key={tab.id}
@@ -1655,7 +1732,52 @@ export default function App() {
         </nav>
         {renderModal()}
       </div>
+{showAuthModal && (
+  <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-6">
+    <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl">
+      
+      <h2 className="text-2xl font-bold mb-2 text-center">
+        로그인
+      </h2>
 
+      <p className="text-sm text-gray-500 text-center mb-5">
+        계정으로 데이터를 안전하게 저장하세요
+      </p>
+
+      <div className="flex flex-col gap-3">
+        <input
+          type="email"
+          placeholder="이메일"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="border border-gray-200 p-3 rounded-xl"
+        />
+
+        <input
+          type="password"
+          placeholder="비밀번호"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="border border-gray-200 p-3 rounded-xl"
+        />
+
+        <button
+          onClick={handleLogin}
+          className="bg-black text-white p-3 rounded-xl font-bold"
+        >
+          로그인
+        </button>
+
+        <button
+          onClick={handleSignup}
+          className="bg-gray-100 text-gray-800 p-3 rounded-xl font-bold"
+        >
+          회원가입
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {/* --- 커스텀 다이얼로그 (확인창/안림창) --- */}
       {dialog.isOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex justify-center items-center p-4 animate-fade-in">

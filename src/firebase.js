@@ -3,6 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+console.log(import.meta.env.VITE_FIREBASE_API_KEY);
 // Vite 환경변수(import.meta.env)를 사용하여 설정값을 불러옵니다.
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
