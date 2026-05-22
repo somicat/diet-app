@@ -97,18 +97,54 @@ const getUserStoredAppData = (uid) => {
 };
 
 const NUTRITION_FIELDS = ['kcal', 'carb', 'protein', 'fat', 'sugar'];
+const FIRESTORE_BATCH_LIMIT = 450;
+const NUTRITION_INPUT_PATTERN = /^-?\d+(?:\.\d+)?(\s*~\s*-?\d+(?:\.\d+)?)?$/;
+
+const sanitizeNutritionInputString = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+
+  let str = String(value).trim();
+  str = str.replace(/[～〜﹏]/g, '~');
+  str = str.replace(/(\d(?:\.\d+)?)\s*[-–—]\s*(\d(?:\.\d+)?)/g, '$1~$2');
+  str = str.replace(/(\d),(\d+)/g, '$1.$2');
+  return str.replace(/\s+/g, ' ').trim();
+};
+
+const isValidNutritionInput = (value) => {
+  const str = sanitizeNutritionInputString(value);
+  return Boolean(str) && NUTRITION_INPUT_PATTERN.test(str);
+};
+
+const formatNutritionFieldForInput = (value) =>
+  value === null || value === undefined ? '' : sanitizeNutritionInputString(value);
+
+const stripUndefined = (obj) => {
+  if (obj === undefined) return undefined;
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+
+  const ctor = obj?.constructor?.name;
+  if (ctor && ctor !== 'Object') return obj;
+
+  return Object.entries(obj).reduce((acc, [key, value]) => {
+    if (value === undefined) return acc;
+    acc[key] = stripUndefined(value);
+    return acc;
+  }, {});
+};
 
 const normalizeRangeInput = (value) => {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
 
-  const str = String(value).trim().replace(/,/g, '');
+  const str = sanitizeNutritionInputString(value);
   if (!str) return 0;
 
   const rangeMatch = str.match(/^(-?\d+(?:\.\d+)?)\s*~\s*(-?\d+(?:\.\d+)?)$/);
   if (rangeMatch) return `${Number(rangeMatch[1])}~${Number(rangeMatch[2])}`;
 
-  const numericMatch = str.match(/-?\d+(?:\.\d+)?/);
+  const numericMatch = str.match(/^-?\d+(?:\.\d+)?/);
   return numericMatch ? Number(numericMatch[0]) : 0;
 };
 
@@ -116,13 +152,13 @@ const getNutritionValue = (value) => {
   if (value === null || value === undefined || value === '') return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
 
-  const str = String(value).trim().replace(/,/g, '');
+  const str = sanitizeNutritionInputString(value);
   if (!str) return 0;
 
   const rangeMatch = str.match(/^(-?\d+(?:\.\d+)?)\s*~\s*(-?\d+(?:\.\d+)?)$/);
   if (rangeMatch) return (Number(rangeMatch[1]) + Number(rangeMatch[2])) / 2;
 
-  const numericMatch = str.match(/-?\d+(?:\.\d+)?/);
+  const numericMatch = str.match(/^-?\d+(?:\.\d+)?/);
   return numericMatch ? Number(numericMatch[0]) : 0;
 };
 
@@ -491,72 +527,107 @@ const calculateMacros = (logs) => {
     setIsModalOpen(true);
   };
 
+  const commitFirestoreBatches = async (writes) => {
+    for (let i = 0; i < writes.length; i += FIRESTORE_BATCH_LIMIT) {
+      const batch = writeBatch(db);
+      writes.slice(i, i + FIRESTORE_BATCH_LIMIT).forEach(({ ref, data, options }) => {
+        batch.set(ref, data, options);
+      });
+      await batch.commit();
+    }
+  };
+
   const backupAllDataToFirebase = async () => {
-  if (!currentUser) {
-    showAlert("로그인이 필요합니다.");
-    return;
-  }
+    if (!currentUser) {
+      showAlert("로그인이 필요합니다.");
+      return;
+    }
 
-  setIsCloudSyncing(true);
-  try {
-    const batch = writeBatch(db);
-    const userRef = doc(db, 'users', currentUser.uid);
+    setIsCloudSyncing(true);
+    try {
+      const writes = [];
+      const uid = currentUser.uid;
 
-    batch.set(userRef, {
-      baseWeight,
-      dailyGoals,
-      dDayConfig,
-      weeklyExercisePlan,
-      lastBackupAt: serverTimestamp(),
-    }, { merge: true });
+      writes.push({
+        ref: doc(db, 'users', uid),
+        data: stripUndefined({
+          baseWeight,
+          dailyGoals,
+          dDayConfig,
+          weeklyExercisePlan,
+          lastBackupAt: serverTimestamp(),
+        }),
+        options: { merge: true },
+      });
 
-    Object.entries(nutritionDB).forEach(([name, info]) => {
-      const docId = makeDbDocId(name);
-      batch.set(doc(db, 'users', currentUser.uid, 'nutritionDB', docId), {
-        ...normalizeNutritionInfo(info),
-        name,
-        source: 'single',
-        ownerId: currentUser.uid,
-        isPublic: publishToSharedDb,
-        searchName: normalizeSearchTerm(name),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    });
+      Object.entries(nutritionDB).forEach(([name, info]) => {
+        const docId = makeDbDocId(name);
+        writes.push({
+          ref: doc(db, 'users', uid, 'nutritionDB', docId),
+          data: stripUndefined({
+            ...normalizeNutritionInfo(info),
+            name,
+            source: info?.source || 'single',
+            ownerId: uid,
+            isPublic: info?.isPublic ?? publishToSharedDb,
+            searchName: normalizeSearchTerm(name),
+            updatedAt: serverTimestamp(),
+          }),
+          options: { merge: true },
+        });
+      });
 
-    Object.entries(exerciseDB).forEach(([name, info]) => {
-      const docId = makeDbDocId(name);
-      batch.set(doc(db, 'users', currentUser.uid, 'exerciseDB', docId), {
-        ...info,
-        name,
-        ownerId: currentUser.uid,
-        isPublic: publishToSharedDb,
-        searchName: normalizeSearchTerm(name),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    });
+      Object.entries(exerciseDB).forEach(([name, info]) => {
+        const docId = makeDbDocId(name);
+        writes.push({
+          ref: doc(db, 'users', uid, 'exerciseDB', docId),
+          data: stripUndefined({
+            ...info,
+            name,
+            ownerId: uid,
+            isPublic: info?.isPublic ?? publishToSharedDb,
+            searchName: normalizeSearchTerm(name),
+            updatedAt: serverTimestamp(),
+          }),
+          options: { merge: true },
+        });
+      });
 
-    dietLogs.forEach((log) => {
-      batch.set(doc(db, 'users', currentUser.uid, 'dietLogs', String(log.id)), { ...log, updatedAt: serverTimestamp() }, { merge: true });
-    });
-    weightLogs.forEach((log) => {
-      batch.set(doc(db, 'users', currentUser.uid, 'weightLogs', String(log.id)), { ...log, updatedAt: serverTimestamp() }, { merge: true });
-    });
-    exerciseLogs.forEach((log) => {
-      batch.set(doc(db, 'users', currentUser.uid, 'exerciseLogs', String(log.id)), { ...log, updatedAt: serverTimestamp() }, { merge: true });
-    });
+      dietLogs.forEach((log) => {
+        writes.push({
+          ref: doc(db, 'users', uid, 'dietLogs', String(log.id)),
+          data: stripUndefined({ ...log, updatedAt: serverTimestamp() }),
+          options: { merge: true },
+        });
+      });
+      weightLogs.forEach((log) => {
+        writes.push({
+          ref: doc(db, 'users', uid, 'weightLogs', String(log.id)),
+          data: stripUndefined({ ...log, updatedAt: serverTimestamp() }),
+          options: { merge: true },
+        });
+      });
+      exerciseLogs.forEach((log) => {
+        writes.push({
+          ref: doc(db, 'users', uid, 'exerciseLogs', String(log.id)),
+          data: stripUndefined({ ...log, updatedAt: serverTimestamp() }),
+          options: { merge: true },
+        });
+      });
 
-    await batch.commit();
-    const time = new Date().toLocaleString();
-    localStorage.setItem("lastBackupTime", time);
-    setLastBackupTime(time);
-    showAlert("클라우드 백업이 완료되었습니다.");
-  } catch (error) {
-    console.error(error);
-    showAlert("백업 실패");
-  } finally {
-    setIsCloudSyncing(false);
-  }
-};
+      await commitFirestoreBatches(writes);
+      const time = new Date().toLocaleString();
+      localStorage.setItem("lastBackupTime", time);
+      setLastBackupTime(time);
+      showAlert("클라우드 백업이 완료되었습니다.");
+    } catch (error) {
+      console.error(error);
+      const detail = error?.message ? `\n${error.message}` : '';
+      showAlert(`백업 실패${detail}`);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
   // 기록 저장 처리
   const submitLog = async (e) => {
     e.preventDefault();
@@ -651,7 +722,14 @@ const calculateMacros = (logs) => {
       setNewExerciseForm({ name: key, part: info.part, type: info.type, time: info.time || '' });
     } else {
       setDbMode('single');
-      setSingleItemForm({ name: key, kcal: info.kcal, carb: info.carb, protein: info.protein, fat: info.fat, sugar: info.sugar });
+      setSingleItemForm({
+        name: key,
+        kcal: formatNutritionFieldForInput(info.kcal),
+        carb: formatNutritionFieldForInput(info.carb),
+        protein: formatNutritionFieldForInput(info.protein),
+        fat: formatNutritionFieldForInput(info.fat),
+        sugar: formatNutritionFieldForInput(info.sugar),
+      });
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -2235,6 +2313,11 @@ const renderAccount = () => {
  
      const handleAddSingleItem = async (e) => {
        e.preventDefault();
+       const invalidField = NUTRITION_FIELDS.find((field) => !isValidNutritionInput(singleItemForm[field]));
+       if (invalidField) {
+         showAlert('영양소 값은 3, 3.5, 3~5 형태로 입력해주세요.');
+         return;
+       }
        const newDB = {...nutritionDB};
        if(dbEditingKey && dbEditingKey !== singleItemForm.name) delete newDB[dbEditingKey];
        newDB[singleItemForm.name] = {
@@ -2360,7 +2443,7 @@ const renderAccount = () => {
            )}
  
            {dbMode === 'single' && (
-             <form onSubmit={handleAddSingleItem} className="space-y-3 animate-fade-in">
+             <form onSubmit={handleAddSingleItem} noValidate className="space-y-3 animate-fade-in">
                <div>
                  <label className="text-xs font-semibold text-gray-600 block mb-1">제품/식재료명</label>
                  <input type="text" value={singleItemForm.name} onChange={e => setSingleItemForm({...singleItemForm, name: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" required />
@@ -2371,7 +2454,7 @@ const renderAccount = () => {
                    return (
                      <div key={field}>
                        <label className="text-[10px] font-semibold text-gray-500 block mb-1">{labels[field]}</label>
-                       <input type="text" inputMode="decimal" pattern="^-?\\d+(\\.\\d+)?(\\s*~\\s*-?\\d+(\\.\\d+)?)?$" value={singleItemForm[field]} onChange={e => setSingleItemForm({...singleItemForm, [field]: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="예: 3 또는 3~5" required />
+                       <input type="text" inputMode="text" value={singleItemForm[field] ?? ''} onChange={e => setSingleItemForm({...singleItemForm, [field]: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="예: 3, 3.5, 3~5" required />
                      </div>
                    )
                  })}
