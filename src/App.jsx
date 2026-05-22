@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from "papaparse";
 import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings, Edit3 } from 'lucide-react';
-import { collection, deleteDoc, doc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
 import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -96,8 +96,44 @@ const getUserStoredAppData = (uid) => {
   }, defaults);
 };
 
+const NUTRITION_FIELDS = ['kcal', 'carb', 'protein', 'fat', 'sugar'];
+
+const normalizeRangeInput = (value) => {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+
+  const str = String(value).trim().replace(/,/g, '');
+  if (!str) return 0;
+
+  const rangeMatch = str.match(/^(-?\d+(?:\.\d+)?)\s*~\s*(-?\d+(?:\.\d+)?)$/);
+  if (rangeMatch) return `${Number(rangeMatch[1])}~${Number(rangeMatch[2])}`;
+
+  const numericMatch = str.match(/-?\d+(?:\.\d+)?/);
+  return numericMatch ? Number(numericMatch[0]) : 0;
+};
+
+const getNutritionValue = (value) => {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+
+  const str = String(value).trim().replace(/,/g, '');
+  if (!str) return 0;
+
+  const rangeMatch = str.match(/^(-?\d+(?:\.\d+)?)\s*~\s*(-?\d+(?:\.\d+)?)$/);
+  if (rangeMatch) return (Number(rangeMatch[1]) + Number(rangeMatch[2])) / 2;
+
+  const numericMatch = str.match(/-?\d+(?:\.\d+)?/);
+  return numericMatch ? Number(numericMatch[0]) : 0;
+};
+
+const normalizeNutritionInfo = (info = {}) =>
+  NUTRITION_FIELDS.reduce((acc, field) => ({
+    ...acc,
+    [field]: normalizeRangeInput(info[field]),
+  }), {});
+
 const formatRemainder = (max, cur) => {
-  const diff = max - cur;
+  const diff = getNutritionValue(max) - getNutritionValue(cur);
   const absVal = Math.abs(diff).toFixed(1);
   if (diff < 0) return `-${absVal}`;
   return absVal;
@@ -354,6 +390,7 @@ useEffect(() => {
   const [recipeForm, setRecipeForm] = useState({ name: '', ingredients: [] });
   const [newIngredient, setNewIngredient] = useState({ menu: Object.keys(nutritionDB)[0] || '', qty: 1 });
   const [singleItemForm, setSingleItemForm] = useState({ name: '', kcal: '', carb: '', protein: '', fat: '', sugar: '' });
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [newExerciseForm, setNewExerciseForm] = useState({ name: '', part: '전신', type: '유산소', time: '' });
     
   const handleInputChange = (e) => {
@@ -374,11 +411,11 @@ const calculateMacros = (logs) => {
     const info = nutritionDB[log.menu] || {};
 
     return {
-      kcal: acc.kcal + (info.kcal * log.qty),
-      carb: acc.carb + (info.carb * log.qty),
-      protein: acc.protein + (info.protein * log.qty),
-      fat: acc.fat + (info.fat * log.qty),
-      sugar: acc.sugar + (info.sugar * log.qty),
+      kcal: acc.kcal + (getNutritionValue(info.kcal) * log.qty),
+      carb: acc.carb + (getNutritionValue(info.carb) * log.qty),
+      protein: acc.protein + (getNutritionValue(info.protein) * log.qty),
+      fat: acc.fat + (getNutritionValue(info.fat) * log.qty),
+      sugar: acc.sugar + (getNutritionValue(info.sugar) * log.qty),
     };
 
   }, {
@@ -455,15 +492,69 @@ const calculateMacros = (logs) => {
   };
 
   const backupAllDataToFirebase = async () => {
+  if (!currentUser) {
+    showAlert("로그인이 필요합니다.");
+    return;
+  }
+
+  setIsCloudSyncing(true);
   try {
+    const batch = writeBatch(db);
+    const userRef = doc(db, 'users', currentUser.uid);
 
-    showAlert("백업 기능 준비중입니다.");
+    batch.set(userRef, {
+      baseWeight,
+      dailyGoals,
+      dDayConfig,
+      weeklyExercisePlan,
+      lastBackupAt: serverTimestamp(),
+    }, { merge: true });
 
+    Object.entries(nutritionDB).forEach(([name, info]) => {
+      const docId = makeDbDocId(name);
+      batch.set(doc(db, 'users', currentUser.uid, 'nutritionDB', docId), {
+        ...normalizeNutritionInfo(info),
+        name,
+        source: 'single',
+        ownerId: currentUser.uid,
+        isPublic: publishToSharedDb,
+        searchName: normalizeSearchTerm(name),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+
+    Object.entries(exerciseDB).forEach(([name, info]) => {
+      const docId = makeDbDocId(name);
+      batch.set(doc(db, 'users', currentUser.uid, 'exerciseDB', docId), {
+        ...info,
+        name,
+        ownerId: currentUser.uid,
+        isPublic: publishToSharedDb,
+        searchName: normalizeSearchTerm(name),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+
+    dietLogs.forEach((log) => {
+      batch.set(doc(db, 'users', currentUser.uid, 'dietLogs', String(log.id)), { ...log, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    weightLogs.forEach((log) => {
+      batch.set(doc(db, 'users', currentUser.uid, 'weightLogs', String(log.id)), { ...log, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    exerciseLogs.forEach((log) => {
+      batch.set(doc(db, 'users', currentUser.uid, 'exerciseLogs', String(log.id)), { ...log, updatedAt: serverTimestamp() }, { merge: true });
+    });
+
+    await batch.commit();
+    const time = new Date().toLocaleString();
+    localStorage.setItem("lastBackupTime", time);
+    setLastBackupTime(time);
+    showAlert("클라우드 백업이 완료되었습니다.");
   } catch (error) {
-
     console.error(error);
-
     showAlert("백업 실패");
+  } finally {
+    setIsCloudSyncing(false);
   }
 };
   // 기록 저장 처리
@@ -725,11 +816,11 @@ const calculateMacros = (logs) => {
         await savePersonalExerciseItem(item.name, exerciseInfo, false);
       } else {
         const nutritionInfo = {
-          kcal: Number(item.kcal) || 0,
-          carb: Number(item.carb) || 0,
-          protein: Number(item.protein) || 0,
-          fat: Number(item.fat) || 0,
-          sugar: Number(item.sugar) || 0,
+          kcal: normalizeRangeInput(item.kcal),
+          carb: normalizeRangeInput(item.carb),
+          protein: normalizeRangeInput(item.protein),
+          fat: normalizeRangeInput(item.fat),
+          sugar: normalizeRangeInput(item.sugar),
         };
         setNutritionDB((prev) => ({ ...prev, [item.name]: nutritionInfo }));
         await savePersonalNutritionItem(item.name, nutritionInfo, item.source || 'single', false);
@@ -903,19 +994,7 @@ const calculateMacros = (logs) => {
       });
   };
 
-  const parseRangeValue = (value) => {
-    if (!value) return 0;
-    if (typeof value === "number") return isNaN(value) ? 0 : Math.round(value);
-
-    const str = String(value).trim();
-    if (str.includes("~")) {
-      const [min, max] = str.split("~").map((v) => parseNumericValue(v));
-      if (!isNaN(min) && !isNaN(max) && (min > 0 || max > 0)) return Math.round((min + max) / 2);
-    }
-
-    const num = Number(str);
-    return !isNaN(num) ? Math.round(num) : 0;
-  };
+  const parseRangeValue = (value) => normalizeRangeInput(value);
 
   const parseNumericValue = (value) => {
     if (value === null || value === undefined || value === "") return 0;
@@ -923,7 +1002,7 @@ const calculateMacros = (logs) => {
 
     const str = String(value).trim();
     if (!str) return 0;
-    if (str.includes("~")) return parseRangeValue(str);
+    if (str.includes("~")) return getNutritionValue(str);
 
     const match = str.replace(/,/g, "").match(/-?\d+(\.\d+)?/);
     return match ? Number(match[0]) : 0;
@@ -1411,12 +1490,13 @@ const calculateMacros = (logs) => {
             { label: '지방', cur: todayMacros.fat, max: dailyGoals.fat, unit: 'g', color: 'bg-yellow-400' },
             { label: '첨가당', cur: todayMacros.sugar, max: dailyGoals.sugar, unit: 'g', color: 'bg-purple-400' }
           ].map(n => {
-            const pct = Math.min((n.cur / n.max) * 100, 100);
+            const max = getNutritionValue(n.max);
+            const pct = max > 0 ? Math.min((getNutritionValue(n.cur) / max) * 100, 100) : 0;
             return (
               <div key={n.label} className="mb-3 last:mb-0">
                 <div className="flex justify-between text-xs mb-1">
                   <span className="font-semibold text-gray-700">{n.label}</span>
-                  <span className="text-gray-500">{n.cur.toFixed(1)} / {n.max}{n.unit} ({pct.toFixed(0)}%)</span>
+                  <span className="text-gray-500">{getNutritionValue(n.cur).toFixed(1)} / {n.max}{n.unit} ({pct.toFixed(0)}%)</span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2">
                   <div className={`h-2 rounded-full ${n.color}`} style={{ width: `${pct}%` }}></div>
@@ -1528,7 +1608,7 @@ const calculateMacros = (logs) => {
                         <li key={log.id} onClick={() => openModal('diet', log, selectedDietDate)} 
                             className="flex justify-between text-xs items-center bg-gray-50 p-1.5 rounded cursor-pointer hover:bg-gray-100 transition-colors border border-transparent hover:border-gray-200">
                           <span className="text-gray-800">{log.menu} <span className="text-gray-400">x{log.qty}</span></span>
-                          <span className="text-gray-500">{info ? Math.round(info.kcal * log.qty) : 0} kcal</span>
+                          <span className="text-gray-500">{info ? Math.round(getNutritionValue(info.kcal) * log.qty) : 0} kcal</span>
                         </li>
                       )
                     })}
@@ -1559,7 +1639,7 @@ const calculateMacros = (logs) => {
                       { cur: selectedMacros.protein, max: dailyGoals.protein }, { cur: selectedMacros.fat, max: dailyGoals.fat },
                       { cur: selectedMacros.sugar, max: dailyGoals.sugar }
                     ].map((item, i) => {
-                      const remainder = item.max - item.cur;
+                      const remainder = getNutritionValue(item.max) - getNutritionValue(item.cur);
                       return (
                         <td key={i} className={`p-2 font-bold ${remainder >= 0 ? 'text-yellow-800' : 'text-red-500'}`}>
                           {formatRemainder(item.max, item.cur)}
@@ -1966,9 +2046,10 @@ const renderAccount = () => {
 
        <button
   onClick={backupAllDataToFirebase}
-  className="w-full bg-gray-100 text-gray-700 p-3 rounded-xl font-bold mb-3 border border-gray-200 hover:bg-gray-200 transition-colors"
+  disabled={isCloudSyncing || !currentUser}
+  className="w-full bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400 text-gray-700 p-3 rounded-xl font-bold mb-3 border border-gray-200 hover:bg-gray-200 transition-colors"
 >
-  클라우드 백업
+  {isCloudSyncing ? '백업 중...' : '클라우드 백업'}
 </button>
 
 <button
@@ -2124,8 +2205,8 @@ const renderAccount = () => {
        const totalNutrition = recipeForm.ingredients.reduce((acc, item) => {
          const info = nutritionDB[item.menu];
          return {
-           kcal: acc.kcal + (info.kcal * item.qty), carb: acc.carb + (info.carb * item.qty),
-           protein: acc.protein + (info.protein * item.qty), fat: acc.fat + (info.fat * item.qty), sugar: acc.sugar + (info.sugar * item.qty)
+           kcal: acc.kcal + (getNutritionValue(info.kcal) * item.qty), carb: acc.carb + (getNutritionValue(info.carb) * item.qty),
+           protein: acc.protein + (getNutritionValue(info.protein) * item.qty), fat: acc.fat + (getNutritionValue(info.fat) * item.qty), sugar: acc.sugar + (getNutritionValue(info.sugar) * item.qty)
          };
        }, { kcal: 0, carb: 0, protein: 0, fat: 0, sugar: 0 });
        
@@ -2157,8 +2238,8 @@ const renderAccount = () => {
        const newDB = {...nutritionDB};
        if(dbEditingKey && dbEditingKey !== singleItemForm.name) delete newDB[dbEditingKey];
        newDB[singleItemForm.name] = {
-         kcal: Number(singleItemForm.kcal), carb: Number(singleItemForm.carb),
-         protein: Number(singleItemForm.protein), fat: Number(singleItemForm.fat), sugar: Number(singleItemForm.sugar)
+         kcal: normalizeRangeInput(singleItemForm.kcal), carb: normalizeRangeInput(singleItemForm.carb),
+         protein: normalizeRangeInput(singleItemForm.protein), fat: normalizeRangeInput(singleItemForm.fat), sugar: normalizeRangeInput(singleItemForm.sugar)
        };
        setNutritionDB(newDB);
        try {
@@ -2290,7 +2371,7 @@ const renderAccount = () => {
                    return (
                      <div key={field}>
                        <label className="text-[10px] font-semibold text-gray-500 block mb-1">{labels[field]}</label>
-                       <input type="number" step="0.1" value={singleItemForm[field]} onChange={e => setSingleItemForm({...singleItemForm, [field]: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" required />
+                       <input type="text" inputMode="decimal" pattern="^-?\\d+(\\.\\d+)?(\\s*~\\s*-?\\d+(\\.\\d+)?)?$" value={singleItemForm[field]} onChange={e => setSingleItemForm({...singleItemForm, [field]: e.target.value})} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" placeholder="예: 3 또는 3~5" required />
                      </div>
                    )
                  })}
