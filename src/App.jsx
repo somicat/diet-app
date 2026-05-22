@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from "papaparse";
 import { Home, Utensils, Scale, Dumbbell, Plus, X, Activity, ArrowUp, ArrowDown, Database, Check, ChevronLeft, ChevronRight, Droplets, Calendar, Trash2, Settings, Edit3 } from 'lucide-react';
-import { collection, deleteDoc, doc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
 import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -96,6 +96,7 @@ const getUserStoredAppData = (uid) => {
   }, defaults);
 };
 
+const USER_SETTINGS_DOC_ID = 'profile';
 const NUTRITION_FIELDS = ['kcal', 'carb', 'protein', 'fat', 'sugar'];
 const FIRESTORE_BATCH_LIMIT = 450;
 const NUTRITION_INPUT_PATTERN = /^-?\d+(?:\.\d+)?(\s*~\s*-?\d+(?:\.\d+)?)?$/;
@@ -345,7 +346,8 @@ useEffect(() => {
 
     const loadPersonalDb = async () => {
       try {
-        const [nutritionSnap, exerciseSnap, dietSnap, weightSnap, exerciseLogSnap] = await Promise.all([
+        const [settingsSnap, nutritionSnap, exerciseSnap, dietSnap, weightSnap, exerciseLogSnap] = await Promise.all([
+          getDoc(doc(db, 'users', currentUser.uid, 'settings', USER_SETTINGS_DOC_ID)),
           getDocs(collection(db, 'users', currentUser.uid, 'nutritionDB')),
           getDocs(collection(db, 'users', currentUser.uid, 'exerciseDB')),
           getDocs(collection(db, 'users', currentUser.uid, 'dietLogs')),
@@ -354,6 +356,14 @@ useEffect(() => {
         ]);
 
         if (generation !== cloudSyncGeneration.current) return;
+
+        if (settingsSnap.exists()) {
+          const settings = settingsSnap.data();
+          if (settings.baseWeight !== undefined) setBaseWeight(settings.baseWeight);
+          if (settings.dailyGoals) setDailyGoals(settings.dailyGoals);
+          if (settings.dDayConfig) setDDayConfig(normalizeDDayConfig(settings.dDayConfig));
+          if (settings.weeklyExercisePlan) setWeeklyExercisePlan(settings.weeklyExercisePlan);
+        }
 
         const mapCloudLogs = (snap) =>
           snap.docs.map((itemDoc) => ({
@@ -549,12 +559,13 @@ const calculateMacros = (logs) => {
       const uid = currentUser.uid;
 
       writes.push({
-        ref: doc(db, 'users', uid),
+        ref: doc(db, 'users', uid, 'settings', USER_SETTINGS_DOC_ID),
         data: stripUndefined({
           baseWeight,
           dailyGoals,
           dDayConfig,
           weeklyExercisePlan,
+          ownerId: uid,
           lastBackupAt: serverTimestamp(),
         }),
         options: { merge: true },

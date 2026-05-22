@@ -1,0 +1,65 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isPublicOwner() {
+      return isSignedIn()
+        && (
+          (request.resource == null && resource.data.ownerId == request.auth.uid)
+          || (request.resource != null && request.resource.data.ownerId == request.auth.uid)
+        );
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /settings/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /nutritionDB/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /exerciseDB/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /dietLogs/{logId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /weightLogs/{logId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /exerciseLogs/{logId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    match /publicNutritionDB/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /publicExerciseDB/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+  }
+}
